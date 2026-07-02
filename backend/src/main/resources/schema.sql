@@ -23,3 +23,19 @@ CREATE TABLE IF NOT EXISTS product_config (
     created_at DATETIME,
     updated_at DATETIME
 );
+
+CREATE TABLE IF NOT EXISTS article (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(200) NOT NULL,
+    summary VARCHAR(500),
+    content LONGTEXT,
+    type VARCHAR(50) NOT NULL,
+    language VARCHAR(20) NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    tags VARCHAR(500),
+    keywords VARCHAR(500),
+    created_by BIGINT,
+    updated_by BIGINT,
+    created_at DATETIME,
+    updated_at DATETIME
+);

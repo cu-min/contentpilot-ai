@@ -23,6 +23,7 @@ function BasicLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const user = authStore.currentUser;
+  const selectedMenuKey = location.pathname.startsWith('/articles') ? '/articles' : location.pathname;
 
   const menuItems = authStore.role === 'ADMIN'
     ? [
@@ -48,7 +49,7 @@ function BasicLayout() {
         <Menu
           className="side-menu"
           mode="inline"
-          selectedKeys={[location.pathname]}
+          selectedKeys={[selectedMenuKey]}
           items={menuItems}
           onClick={handleMenuClick}
         />

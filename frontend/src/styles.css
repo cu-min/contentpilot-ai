@@ -21,3 +21,14 @@ body {
 .muted-text {
   color: #667085;
 }
+
+.article-list-card.ant-card {
+  max-width: none;
+}
+
+.table-link-button.ant-btn {
+  height: auto;
+  padding: 0;
+  white-space: normal;
+  text-align: left;
+}

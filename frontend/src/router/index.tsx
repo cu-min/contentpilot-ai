@@ -3,6 +3,7 @@ import BasicLayout from '../layouts/BasicLayout';
 import Login from '../pages/Login';
 import Dashboard from '../pages/Dashboard';
 import Article from '../pages/Article';
+import ArticleEditor from '../pages/ArticleEditor';
 import AiGenerate from '../pages/AiGenerate';
 import Product from '../pages/Product';
 import Platform from '../pages/Platform';
@@ -33,6 +34,8 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'dashboard', element: <Dashboard /> },
       { path: 'articles', element: <Article /> },
+      { path: 'articles/new', element: <ArticleEditor /> },
+      { path: 'articles/:id', element: <ArticleEditor /> },
       { path: 'ai-generate', element: <AiGenerate /> },
       { path: 'product', element: <Product /> },
       { path: 'platform', element: <Platform /> },

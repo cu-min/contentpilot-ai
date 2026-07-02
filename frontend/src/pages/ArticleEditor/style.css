@@ -1,0 +1,15 @@
+.article-editor-card.ant-card {
+  max-width: 1180px;
+}
+
+.markdown-editor.ant-input {
+  min-height: 360px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  line-height: 1.7;
+}
+
+.markdown-preview-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
