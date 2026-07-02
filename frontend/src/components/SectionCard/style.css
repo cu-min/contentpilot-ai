@@ -1,0 +1,10 @@
+.section-card.ant-card {
+  max-width: 980px;
+  border: 1px solid #e6ebf3;
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(31, 41, 55, 0.06);
+}
+
+.section-card .ant-card-body {
+  padding: 24px;
+}
