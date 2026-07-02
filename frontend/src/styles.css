@@ -1,0 +1,23 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #f5f7fb;
+  color: #1f2937;
+}
+
+.page-panel {
+  min-height: 220px;
+}
+
+.muted-text {
+  color: #667085;
+}

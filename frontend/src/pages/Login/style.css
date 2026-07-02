@@ -1,0 +1,12 @@
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef2f8;
+}
+
+.login-card {
+  width: min(420px, calc(100vw - 32px));
+  border-radius: 8px;
+}
