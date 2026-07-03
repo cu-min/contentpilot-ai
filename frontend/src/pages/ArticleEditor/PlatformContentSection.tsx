@@ -14,6 +14,7 @@ import {
 } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   archivePlatformContent,
   generatePlatformContents,
@@ -44,6 +45,7 @@ interface PlatformContentSectionProps {
 }
 
 export default function PlatformContentSection({ articleId }: PlatformContentSectionProps) {
+  const navigate = useNavigate();
   const [generateForm] = Form.useForm<PlatformContentGeneratePayload>();
   const [editForm] = Form.useForm<PlatformContentUpdatePayload>();
   const [items, setItems] = useState<ArticlePlatformContent[]>([]);
@@ -181,10 +183,11 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
     {
       title: '操作',
       key: 'action',
-      width: 180,
+      width: 260,
       render: (_, record) => (
         <Space size={8}>
           <Button size="small" onClick={() => openEdit(record)}>查看编辑</Button>
+          <Button size="small" onClick={() => navigate(`/publish?platformContentId=${record.id}`)}>创建任务</Button>
           {record.status === 'ARCHIVED' ? (
             <Button size="small" onClick={() => handleRestore(record)}>恢复</Button>
           ) : (
