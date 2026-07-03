@@ -188,13 +188,16 @@ public interface PlatformPublisher {
 
 阶段 8.5 只做掘金 / CSDN 发布方案调研与试点计划，不实现真实发布代码。
 
-阶段 9 建议优先新增 `JuejinPublisher`，只做掘金草稿创建：
+阶段 9 新增 `JuejinPublisher`，实际采用“已有草稿更新 + 可选正式发布”：
 
-- 使用 `platform_account.auth_config` 保存 Cookie、默认分类 ID、默认标签 ID 等本地配置。
+- 使用 `platform_account.auth_config` 保存 Cookie、userAgent、csrfToken、draftId、默认分类 ID、默认标签 ID 等本地配置。
 - 使用 `article_platform_content` 提供标题、摘要、Markdown 正文和标签。
-- 使用 `publish_task.publish_url` 暂存草稿链接或草稿标记。
+- 调用掘金 `article_draft/update` 更新已有草稿。
+- `draftOnly=true` 时只更新草稿，任务成功后 `publish_url` 写入 `https://juejin.cn/editor/drafts/{draftId}`。
+- `draftOnly=false` 时 update 成功后再调用 `article/publish`，阶段 9 暂按 HTTP 2xx 且无异常认为成功。
+- 使用 `publish_task.publish_url` 暂存草稿编辑链接。
 - 使用 `publish_task.error_message` 记录失败原因。
 - 保留 `MockPublisher`，不删除。
-- 不做正式发布、追踪链接、数据看板、定时调度、自动重试或 CSDN。
+- 不自动创建新草稿，不做 CSDN、追踪链接、数据看板、定时调度或自动重试。
 
 阶段 10 如启动 CSDN，建议作为可选阶段新增 `CsdnPublisher`，通过 Playwright 打开 CSDN 编辑器并自动填充内容，停在人工确认页面，不强制点击发布。

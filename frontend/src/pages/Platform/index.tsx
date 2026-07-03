@@ -253,11 +253,11 @@ export default function Platform() {
           <Form.Item
             label="认证配置"
             name="authConfig"
-            extra={editing ? '编辑时留空表示保留原认证配置。不要粘贴真实生产 Cookie、Token 或密钥到代码仓库。' : '建议使用 JSON 字符串保存本地测试配置，本阶段不会验证其可用性。'}
+            extra={editing ? '编辑时留空表示保留原认证配置。掘金试点需要 cookie、userAgent、csrfToken、draftId、defaultCategoryId，敏感信息不要提交到代码仓库。' : '建议使用 JSON 字符串保存本地测试配置。掘金试点需要 cookie、userAgent、csrfToken、draftId、defaultCategoryId。'}
           >
             <TextArea
               rows={5}
-              placeholder='例如：{"appId":"...","appSecret":"..."}'
+              placeholder='例如：{"draftId":"...","defaultCategoryId":"...","draftOnly":true}'
             />
           </Form.Item>
           <Form.Item label="启用状态" name="enabled" valuePropName="checked" getValueFromEvent={(checked) => (checked ? 1 : 0)} getValueProps={(value) => ({ checked: value === 1 })}>

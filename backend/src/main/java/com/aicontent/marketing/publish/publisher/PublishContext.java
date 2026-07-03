@@ -15,6 +15,7 @@ public record PublishContext(
         String keywords,
         String publishMode,
         boolean accountConfigExists,
+        String accountAuthConfig,
         String accountName,
         String accountRemark,
         LocalDateTime scheduleTime

@@ -17,9 +17,16 @@ public class PublisherRegistry {
 
     public PlatformPublisher getPublisher(String platform, String publishMode) {
         return publishers.stream()
-                .filter(publisher -> matches(publisher.platform(), platform) && matches(publisher.mode(), publishMode))
+                .filter(publisher -> exactMatch(publisher.platform(), platform) && exactMatch(publisher.mode(), publishMode))
                 .findFirst()
+                .or(() -> publishers.stream()
+                        .filter(publisher -> matches(publisher.platform(), platform) && matches(publisher.mode(), publishMode))
+                        .findFirst())
                 .orElse(mockPublisher);
+    }
+
+    private boolean exactMatch(String supported, String actual) {
+        return supported.equals(actual);
     }
 
     private boolean matches(String supported, String actual) {

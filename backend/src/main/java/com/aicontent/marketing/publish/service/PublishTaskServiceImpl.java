@@ -177,7 +177,7 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
             } else {
                 task.setStatus(STATUS_FAILED);
                 task.setPublishUrl(null);
-                task.setErrorMessage(StringUtils.hasText(result.errorMessage()) ? result.errorMessage() : "模拟发布失败");
+                task.setErrorMessage(StringUtils.hasText(result.errorMessage()) ? result.errorMessage() : "发布执行失败");
             }
         } catch (Exception exception) {
             task.setStatus(STATUS_FAILED);
@@ -268,6 +268,7 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
                 content.getKeywords(),
                 task.getPublishMode(),
                 StringUtils.hasText(account.getAuthConfig()),
+                account.getAuthConfig(),
                 account.getAccountName(),
                 account.getRemark(),
                 task.getScheduleTime()
