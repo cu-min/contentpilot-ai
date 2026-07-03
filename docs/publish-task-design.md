@@ -183,3 +183,18 @@ public interface PlatformPublisher {
 - `publish_task`：计划类型、计划时间、任务状态、发布方式
 
 不同平台的 Publisher 可以独立演进，避免用一套发布逻辑硬套所有平台。
+
+## 试点路线补充
+
+阶段 8.5 只做掘金 / CSDN 发布方案调研与试点计划，不实现真实发布代码。
+
+阶段 9 建议优先新增 `JuejinPublisher`，只做掘金草稿创建：
+
+- 使用 `platform_account.auth_config` 保存 Cookie、默认分类 ID、默认标签 ID 等本地配置。
+- 使用 `article_platform_content` 提供标题、摘要、Markdown 正文和标签。
+- 使用 `publish_task.publish_url` 暂存草稿链接或草稿标记。
+- 使用 `publish_task.error_message` 记录失败原因。
+- 保留 `MockPublisher`，不删除。
+- 不做正式发布、追踪链接、数据看板、定时调度、自动重试或 CSDN。
+
+阶段 10 如启动 CSDN，建议作为可选阶段新增 `CsdnPublisher`，通过 Playwright 打开 CSDN 编辑器并自动填充内容，停在人工确认页面，不强制点击发布。
