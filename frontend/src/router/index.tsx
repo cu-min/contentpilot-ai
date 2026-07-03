@@ -11,7 +11,6 @@ import Publish from '../pages/Publish';
 import Tracking from '../pages/Tracking';
 import DataDashboard from '../pages/DataDashboard';
 import User from '../pages/User';
-import Log from '../pages/Log';
 import { LoginRoute, ProtectedRoute } from './RouteGuards';
 
 export const router = createBrowserRouter([
@@ -50,7 +49,6 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-      { path: 'logs', element: <Log /> },
     ],
   },
 ]);

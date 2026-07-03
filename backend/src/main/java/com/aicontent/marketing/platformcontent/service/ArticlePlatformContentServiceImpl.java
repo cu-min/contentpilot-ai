@@ -12,6 +12,7 @@ import com.aicontent.marketing.platformcontent.dto.PlatformContentUpdateRequest;
 import com.aicontent.marketing.platformcontent.entity.ArticlePlatformContent;
 import com.aicontent.marketing.platformcontent.mapper.ArticlePlatformContentMapper;
 import com.aicontent.marketing.platformcontent.prompt.PlatformContentPromptBuilder;
+import com.aicontent.marketing.platformcontent.rule.PlatformAdaptRuleFactory;
 import com.aicontent.marketing.platformcontent.vo.ArticlePlatformContentVO;
 import com.aicontent.marketing.product.service.ProductConfigService;
 import com.aicontent.marketing.product.vo.ProductConfigVO;
@@ -24,7 +25,6 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 @Service
 public class ArticlePlatformContentServiceImpl extends ServiceImpl<ArticlePlatformContentMapper, ArticlePlatformContent>
@@ -33,31 +33,27 @@ public class ArticlePlatformContentServiceImpl extends ServiceImpl<ArticlePlatfo
     private static final String STATUS_DRAFT = "DRAFT";
     private static final String STATUS_ARCHIVED = "ARCHIVED";
 
-    private static final Set<String> PLATFORMS = Set.of(
-            "WECHAT_OFFICIAL",
-            "ZHIHU",
-            "CSDN",
-            "JUEJIN"
-    );
-
     private final ArticleMapper articleMapper;
     private final ProductConfigService productConfigService;
     private final AiModelService aiModelService;
     private final AiJsonParser aiJsonParser;
     private final PlatformContentPromptBuilder promptBuilder;
+    private final PlatformAdaptRuleFactory ruleFactory;
 
     public ArticlePlatformContentServiceImpl(
             ArticleMapper articleMapper,
             ProductConfigService productConfigService,
             AiModelService aiModelService,
             AiJsonParser aiJsonParser,
-            PlatformContentPromptBuilder promptBuilder
+            PlatformContentPromptBuilder promptBuilder,
+            PlatformAdaptRuleFactory ruleFactory
     ) {
         this.articleMapper = articleMapper;
         this.productConfigService = productConfigService;
         this.aiModelService = aiModelService;
         this.aiJsonParser = aiJsonParser;
         this.promptBuilder = promptBuilder;
+        this.ruleFactory = ruleFactory;
     }
 
     @Override
@@ -193,7 +189,7 @@ public class ArticlePlatformContentServiceImpl extends ServiceImpl<ArticlePlatfo
 
         LinkedHashSet<String> normalized = new LinkedHashSet<>();
         for (String platform : platforms) {
-            if (!PLATFORMS.contains(platform)) {
+            if (!ruleFactory.supports(platform)) {
                 throw new BusinessException("platform is invalid");
             }
             normalized.add(platform);

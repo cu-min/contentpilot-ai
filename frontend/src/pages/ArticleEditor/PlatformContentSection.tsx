@@ -1,4 +1,5 @@
 import {
+  Alert,
   Button,
   Checkbox,
   Form,
@@ -33,6 +34,7 @@ import {
   getPlatformContentPlatformLabel,
   getPlatformContentStatusLabel,
   platformContentOptions,
+  platformContentRuleSummaries,
 } from '../../types/platformContent';
 
 const { TextArea } = Input;
@@ -210,6 +212,13 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
           </Button>
         )}
       >
+        <Alert
+          className="platform-content-rule-alert"
+          type="info"
+          showIcon
+          message="平台适配会自动删减、重组和改写内容，不是简单复制原文。"
+          description="系统会保留核心观点、产品价值、用户痛点、解决方案和温和转化引导，同时删除不适合目标平台的长铺垫、硬广表达和冗余段落。"
+        />
         <Table
           rowKey="id"
           loading={loading}
@@ -228,6 +237,7 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
         okText="开始生成"
         cancelText="取消"
         confirmLoading={generating}
+        width={760}
       >
         <Form
           form={generateForm}
@@ -242,6 +252,17 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
           >
             <Checkbox.Group options={[...platformContentOptions]} />
           </Form.Item>
+          <div className="platform-content-rule-grid">
+            {platformContentRuleSummaries.map((rule) => (
+              <div className="platform-content-rule-item" key={rule.platform}>
+                <Space size={8}>
+                  <Tag color="processing">{rule.name}</Tag>
+                  <Typography.Text strong>{rule.goal}</Typography.Text>
+                </Space>
+                <Typography.Text className="muted-text">{rule.summary}</Typography.Text>
+              </div>
+            ))}
+          </div>
           <Form.Item label="额外要求" name="extraRequirement">
             <TextArea
               rows={4}
@@ -251,7 +272,7 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
             />
           </Form.Item>
           <Typography.Text className="muted-text">
-            重复生成同一篇文章的同一平台稿时，会更新已有稿件。
+            重复生成同一篇文章的同一平台稿时，会更新已有稿件。平台稿会按平台规则删减和重组，不会保留原文所有段落。
           </Typography.Text>
         </Form>
       </Modal>

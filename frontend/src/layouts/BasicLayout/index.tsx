@@ -16,7 +16,6 @@ const baseMenuItems: NonNullable<MenuProps['items']> = [
   { key: '/publish', label: '发布任务' },
   { key: '/tracking', label: '追踪链接' },
   { key: '/data-dashboard', label: '数据看板' },
-  { key: '/logs', label: '操作日志' },
 ];
 
 function BasicLayout() {

@@ -14,6 +14,27 @@
   gap: 8px;
 }
 
+.platform-content-rule-alert {
+  margin-bottom: 16px;
+}
+
+.platform-content-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: -4px 0 18px;
+}
+
+.platform-content-rule-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
 .platform-content-meta-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -40,7 +61,8 @@
 
 @media (max-width: 992px) {
   .platform-content-meta-row,
-  .platform-content-editor-grid {
+  .platform-content-editor-grid,
+  .platform-content-rule-grid {
     grid-template-columns: 1fr;
   }
 }
