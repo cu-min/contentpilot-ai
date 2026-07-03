@@ -61,6 +61,9 @@ export const publishTypeOptions = [
 export const publishTaskStatusOptions = [
   { label: '草稿', value: 'DRAFT' },
   { label: '待发布', value: 'PENDING' },
+  { label: '执行中', value: 'RUNNING' },
+  { label: '执行成功', value: 'SUCCESS' },
+  { label: '执行失败', value: 'FAILED' },
   { label: '已取消', value: 'CANCELLED' },
 ] as const;
 

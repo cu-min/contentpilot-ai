@@ -8,14 +8,12 @@ import './style.css';
 const { Header, Content, Sider } = Layout;
 
 const baseMenuItems: NonNullable<MenuProps['items']> = [
-  { key: '/dashboard', label: '首页仪表盘' },
+  { key: '/dashboard', label: '首页概览' },
   { key: '/articles', label: '文章库' },
   { key: '/ai-generate', label: 'AI文章生成' },
   { key: '/product', label: '产品配置' },
   { key: '/platform', label: '平台管理' },
   { key: '/publish', label: '发布任务' },
-  { key: '/tracking', label: '追踪链接' },
-  { key: '/data-dashboard', label: '数据看板' },
 ];
 
 function BasicLayout() {
@@ -26,9 +24,8 @@ function BasicLayout() {
 
   const menuItems = authStore.role === 'ADMIN'
     ? [
-        ...baseMenuItems.slice(0, 8),
+        ...baseMenuItems,
         { key: '/user', label: '用户管理' },
-        ...baseMenuItems.slice(8),
       ]
     : baseMenuItems;
 
@@ -55,7 +52,7 @@ function BasicLayout() {
       </Sider>
       <Layout>
         <Header className="top-header">
-          <Typography.Text strong>阶段 2：登录注册与 JWT 鉴权</Typography.Text>
+          <Typography.Text strong>MVP：内容生成到发布执行</Typography.Text>
           <Space size={16}>
             <Typography.Text>
               {user?.nickname || user?.username}

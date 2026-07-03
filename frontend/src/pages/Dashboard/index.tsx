@@ -22,7 +22,7 @@ export default function Dashboard() {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Typography.Title level={3}>首页仪表盘</Typography.Title>
+      <Typography.Title level={3}>首页概览</Typography.Title>
       <Card className="page-panel">
         <Space direction="vertical" size={12}>
           <Typography.Text strong>后端健康检查</Typography.Text>

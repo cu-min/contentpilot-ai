@@ -1,8 +1,10 @@
-# 发布任务草稿流转设计
+# 发布任务草稿流转与执行框架设计
 
 ## 阶段目标
 
-阶段 7 只完成平台账号配置、发布任务管理和发布任务草稿流转，为后续自动发布做准备。本阶段不执行真实自动发布，不调用微信公众号、知乎、CSDN、掘金的真实发布接口，不接入 Playwright / Selenium，不生成追踪链接，也不自动读取发布链接。
+阶段 7 完成平台账号配置、发布任务管理和发布任务草稿流转，为后续自动发布做准备。阶段 8 在此基础上启用最小版发布执行框架，通过 `MockPublisher` 验证系统内部执行链路。
+
+当前阶段仍不执行真实自动发布，不调用微信公众号、知乎、CSDN、掘金的真实发布接口，不接入 Playwright / Selenium，不生成追踪链接，也不自动读取真实发布链接。
 
 ## 平台发布策略引用
 
@@ -15,7 +17,7 @@
 | CSDN | 浏览器自动化，草稿或自动填充 | 平台账号支持浏览器登录态，发布任务保留草稿流转 |
 | 掘金 | 非官方草稿接口试点 + 浏览器兜底 | 发布方式支持 `UNOFFICIAL_API` 和 `BROWSER_AUTOMATION` |
 
-后续自动发布阶段将基于 `platform_account`、`article_platform_content`、`publish_task` 实现平台 Publisher。
+后续真实平台发布阶段将基于 `platform_account`、`article_platform_content`、`publish_task` 实现具体平台 Publisher。
 
 ## 平台账号配置设计
 
@@ -43,20 +45,20 @@
 
 表：`publish_task`
 
-阶段 7 实际使用状态：
+当前实际使用状态：
 
 | 状态 | 说明 |
 |---|---|
 | `DRAFT` | 草稿，可编辑 |
-| `PENDING` | 已提交，等待后续自动发布阶段处理 |
+| `PENDING` | 已提交，等待手动执行 |
+| `RUNNING` | 执行中，由发布执行框架写入 |
+| `SUCCESS` | 执行成功，记录 `publish_url` |
+| `FAILED` | 执行失败，记录 `error_message` |
 | `CANCELLED` | 已取消 |
 
 后续预留状态：
 
 ```text
-RUNNING
-SUCCESS
-FAILED
 NEED_LOGIN
 NEED_CAPTCHA
 NEED_MANUAL_CONFIRM
@@ -95,8 +97,55 @@ CONTENT_REJECTED
 - `IMMEDIATE` 可以不填 `schedule_time`。
 - `SCHEDULED` 必须填写 `schedule_time`。
 - 创建后默认 `DRAFT`。
-- 只有 `DRAFT` 可以编辑和提交。
-- 取消操作只改变状态，不执行发布。
+- 只有 `DRAFT` 可以编辑和提交为 `PENDING`。
+- 只有 `PENDING` 可以手动执行。
+- `DRAFT` / `PENDING` 可以取消为 `CANCELLED`。
+- `RUNNING` 后只允许进入 `SUCCESS` 或 `FAILED`。
+
+## 发布执行接口
+
+```text
+POST /api/publish/tasks/{id}/execute
+```
+
+执行逻辑：
+
+```text
+查询发布任务
+↓
+校验任务状态必须为 PENDING
+↓
+查询平台发布稿和平台账号
+↓
+校验任务、平台稿、平台账号的平台一致
+↓
+任务状态更新为 RUNNING
+↓
+调用 PublisherRegistry 获取发布器
+↓
+当前阶段调用 MockPublisher
+↓
+成功：状态更新为 SUCCESS，并写入 mock publish_url
+失败：状态更新为 FAILED，并写入 error_message
+```
+
+状态约束：
+
+- `DRAFT` 不能直接执行。
+- `CANCELLED` 不能执行。
+- `SUCCESS` 不能重复执行。
+- `FAILED` 暂不做重试。
+- 定时发布任务本阶段不自动扫描，到达 `schedule_time` 后也只允许人工点击执行。
+
+## MockPublisher 说明
+
+`MockPublisher` 只用于阶段 8 验证发布任务执行链路：
+
+- 不调用任何真实平台接口。
+- 不读取真实 Cookie、Token、API Key。
+- 默认模拟发布成功。
+- 成功时返回形如 `https://mock.publish/{platform}/{taskId}` 的模拟链接。
+- 当任务标题、摘要、正文、标签、关键词或账号备注中包含 `mock-fail` 时，模拟发布失败，方便验证失败状态和错误提示。
 
 ## 本阶段边界
 
@@ -109,18 +158,20 @@ CONTENT_REJECTED
 - Playwright / Selenium
 - 追踪链接生成
 - 自动读取发布链接
+- 定时任务自动扫描
+- 失败自动重试
 - 操作日志
 - Redis
 - SaaS 多租户
 
 ## 后续扩展点
 
-后续自动发布阶段建议新增统一 Publisher 抽象：
+发布执行框架采用统一 Publisher 抽象：
 
 ```java
 public interface PlatformPublisher {
     String platform();
-    String publishMode();
+    String mode();
     PublishResult publish(PublishContext context);
 }
 ```

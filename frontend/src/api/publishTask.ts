@@ -29,3 +29,7 @@ export function submitPublishTask(id: number) {
 export function cancelPublishTask(id: number) {
   return request.put<unknown, ApiResult<null>>(`/publish/tasks/${id}/cancel`);
 }
+
+export function executePublishTask(id: number) {
+  return request.post<unknown, ApiResult<PublishTask>>(`/publish/tasks/${id}/execute`);
+}

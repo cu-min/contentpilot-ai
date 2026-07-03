@@ -71,4 +71,12 @@ public class PublishTaskController {
         publishTaskService.cancelTask(id, loginUser.getUserId());
         return Result.success();
     }
+
+    @PostMapping("/{id}/execute")
+    public Result<PublishTaskVO> execute(
+            @PathVariable Long id,
+            @AuthenticationPrincipal LoginUser loginUser
+    ) {
+        return Result.success(publishTaskService.executeTask(id, loginUser.getUserId()));
+    }
 }

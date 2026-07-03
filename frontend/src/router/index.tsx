@@ -8,8 +8,6 @@ import AiGenerate from '../pages/AiGenerate';
 import Product from '../pages/Product';
 import Platform from '../pages/Platform';
 import Publish from '../pages/Publish';
-import Tracking from '../pages/Tracking';
-import DataDashboard from '../pages/DataDashboard';
 import User from '../pages/User';
 import { LoginRoute, ProtectedRoute } from './RouteGuards';
 
@@ -39,8 +37,6 @@ export const router = createBrowserRouter([
       { path: 'product', element: <Product /> },
       { path: 'platform', element: <Platform /> },
       { path: 'publish', element: <Publish /> },
-      { path: 'tracking', element: <Tracking /> },
-      { path: 'data-dashboard', element: <DataDashboard /> },
       {
         path: 'user',
         element: (

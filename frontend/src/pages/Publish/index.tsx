@@ -23,6 +23,7 @@ import { getArticlePlatformContents, getPlatformContentDetail } from '../../api/
 import {
   cancelPublishTask,
   createPublishTask,
+  executePublishTask,
   getPublishTaskDetail,
   getPublishTasks,
   submitPublishTask,
@@ -62,6 +63,7 @@ export default function Publish() {
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [executingTaskId, setExecutingTaskId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<PublishTask | null>(null);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
@@ -265,9 +267,29 @@ export default function Publish() {
     }
   };
 
+  const handleExecute = async (record: PublishTask) => {
+    setExecutingTaskId(record.id);
+    try {
+      const result = await executePublishTask(record.id);
+      if (result.data.status === 'SUCCESS') {
+        message.success('MockPublisher 模拟发布成功');
+      } else {
+        message.error(result.data.errorMessage || 'MockPublisher 模拟发布失败');
+      }
+      await loadTasks();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '执行失败');
+    } finally {
+      setExecutingTaskId(null);
+    }
+  };
+
   const statusColor = (status: PublishTaskStatus) => {
     if (status === 'DRAFT') return 'default';
     if (status === 'PENDING') return 'processing';
+    if (status === 'RUNNING') return 'blue';
+    if (status === 'SUCCESS') return 'success';
+    if (status === 'FAILED') return 'error';
     if (status === 'CANCELLED') return 'warning';
     return 'default';
   };
@@ -320,15 +342,43 @@ export default function Publish() {
       render: (value?: string) => value || '-',
     },
     {
+      title: '发布结果',
+      key: 'publishResult',
+      width: 210,
+      responsive: ['lg'],
+      render: (_, record) => {
+        if (record.status === 'SUCCESS' && record.publishUrl) {
+          return (
+            <Typography.Link href={record.publishUrl} target="_blank" rel="noreferrer">
+              Mock 链接
+            </Typography.Link>
+          );
+        }
+        if (record.status === 'FAILED') {
+          return (
+            <Typography.Text type="danger" ellipsis={{ tooltip: record.errorMessage }}>
+              {record.errorMessage || '执行失败'}
+            </Typography.Text>
+          );
+        }
+        return '-';
+      },
+    },
+    {
       title: '操作',
       key: 'action',
-      width: 230,
+      width: 300,
       render: (_, record) => (
         <Space size={8}>
           <Button size="small" disabled={record.status !== 'DRAFT'} onClick={() => openEdit(record)}>编辑</Button>
           <Button size="small" type="primary" disabled={record.status !== 'DRAFT'} onClick={() => handleSubmit(record)}>提交</Button>
+          {record.status === 'PENDING' ? (
+            <Popconfirm title="确认执行该发布任务？" okText="执行" cancelText="取消" onConfirm={() => handleExecute(record)}>
+              <Button size="small" loading={executingTaskId === record.id}>执行任务</Button>
+            </Popconfirm>
+          ) : null}
           <Popconfirm title="确认取消该发布任务？" okText="取消任务" cancelText="返回" onConfirm={() => handleCancel(record)}>
-            <Button size="small" disabled={record.status === 'CANCELLED'}>取消</Button>
+            <Button size="small" disabled={!['DRAFT', 'PENDING'].includes(record.status)}>取消</Button>
           </Popconfirm>
         </Space>
       ),
@@ -338,15 +388,15 @@ export default function Publish() {
   return (
     <PageContainer
       title="发布任务"
-      description="创建平台发布稿的发布任务草稿，并流转到待发布状态。本阶段不执行真实发布。"
+      description="创建平台发布稿的发布任务草稿，手动执行待发布任务，并用 MockPublisher 验证内部执行链路。"
     >
       <SectionCard>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Alert
             type="info"
             showIcon
-            message="本阶段只管理发布任务草稿和待发布状态，不提供执行发布按钮。"
-            description="后续自动发布阶段会基于平台账号、平台发布稿和发布任务接入不同平台 Publisher。"
+            message="本阶段执行按钮只调用 MockPublisher，不会访问任何真实平台。"
+            description="PENDING 任务可以手动执行；成功会写入 mock 链接，标题、摘要、正文、标签、关键词或账号备注包含 mock-fail 时会模拟失败。"
           />
           <Form form={filterForm} layout="inline" onFinish={() => loadTasks(1, pagination.pageSize)}>
             <Form.Item name="platform">

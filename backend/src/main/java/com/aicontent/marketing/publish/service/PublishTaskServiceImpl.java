@@ -10,6 +10,10 @@ import com.aicontent.marketing.publish.dto.PublishTaskQueryRequest;
 import com.aicontent.marketing.publish.dto.PublishTaskSaveRequest;
 import com.aicontent.marketing.publish.entity.PublishTask;
 import com.aicontent.marketing.publish.mapper.PublishTaskMapper;
+import com.aicontent.marketing.publish.publisher.PlatformPublisher;
+import com.aicontent.marketing.publish.publisher.PublishContext;
+import com.aicontent.marketing.publish.publisher.PublishResult;
+import com.aicontent.marketing.publish.publisher.PublisherRegistry;
 import com.aicontent.marketing.publish.vo.PublishTaskVO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -28,6 +32,9 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     private static final String STATUS_DRAFT = "DRAFT";
     private static final String STATUS_PENDING = "PENDING";
     private static final String STATUS_CANCELLED = "CANCELLED";
+    private static final String STATUS_RUNNING = "RUNNING";
+    private static final String STATUS_SUCCESS = "SUCCESS";
+    private static final String STATUS_FAILED = "FAILED";
 
     private static final Set<String> PLATFORMS = Set.of("WECHAT_OFFICIAL", "ZHIHU", "CSDN", "JUEJIN");
     private static final Set<String> PUBLISH_TYPES = Set.of("IMMEDIATE", "SCHEDULED");
@@ -47,13 +54,16 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
 
     private final ArticlePlatformContentMapper platformContentMapper;
     private final PlatformAccountMapper platformAccountMapper;
+    private final PublisherRegistry publisherRegistry;
 
     public PublishTaskServiceImpl(
             ArticlePlatformContentMapper platformContentMapper,
-            PlatformAccountMapper platformAccountMapper
+            PlatformAccountMapper platformAccountMapper,
+            PublisherRegistry publisherRegistry
     ) {
         this.platformContentMapper = platformContentMapper;
         this.platformAccountMapper = platformAccountMapper;
+        this.publisherRegistry = publisherRegistry;
     }
 
     @Override
@@ -129,13 +139,55 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     @Transactional
     public void cancelTask(Long id, Long currentUserId) {
         PublishTask task = getRequiredTask(id);
-        if (STATUS_CANCELLED.equals(task.getStatus())) {
-            return;
+        if (!STATUS_DRAFT.equals(task.getStatus()) && !STATUS_PENDING.equals(task.getStatus())) {
+            throw new BusinessException("只有草稿或待执行状态的发布任务可以取消");
         }
         task.setStatus(STATUS_CANCELLED);
         task.setUpdatedBy(currentUserId);
         task.setUpdatedAt(LocalDateTime.now());
         updateById(task);
+    }
+
+    @Override
+    public PublishTaskVO executeTask(Long id, Long currentUserId) {
+        PublishTask task = getRequiredTask(id);
+        if (!STATUS_PENDING.equals(task.getStatus())) {
+            throw new BusinessException("只有待执行状态的发布任务可以执行");
+        }
+
+        ArticlePlatformContent platformContent = getRequiredPlatformContent(task.getPlatformContentId());
+        PlatformAccount account = getRequiredAccount(task.getAccountId());
+        validateTaskResources(task, platformContent, account);
+
+        LocalDateTime now = LocalDateTime.now();
+        task.setStatus(STATUS_RUNNING);
+        task.setPublishUrl(null);
+        task.setErrorMessage(null);
+        task.setUpdatedBy(currentUserId);
+        task.setUpdatedAt(now);
+        updateById(task);
+
+        PlatformPublisher publisher = publisherRegistry.getPublisher(task.getPlatform(), task.getPublishMode());
+        try {
+            PublishResult result = publisher.publish(toPublishContext(task, platformContent, account));
+            if (result.success()) {
+                task.setStatus(STATUS_SUCCESS);
+                task.setPublishUrl(result.publishUrl());
+                task.setErrorMessage(null);
+            } else {
+                task.setStatus(STATUS_FAILED);
+                task.setPublishUrl(null);
+                task.setErrorMessage(StringUtils.hasText(result.errorMessage()) ? result.errorMessage() : "模拟发布失败");
+            }
+        } catch (Exception exception) {
+            task.setStatus(STATUS_FAILED);
+            task.setPublishUrl(null);
+            task.setErrorMessage("发布执行失败：" + exception.getMessage());
+        }
+        task.setUpdatedBy(currentUserId);
+        task.setUpdatedAt(LocalDateTime.now());
+        updateById(task);
+        return toVO(task);
     }
 
     private void fillTask(
@@ -165,18 +217,61 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
             throw new BusinessException("定时发布任务必须选择发布时间");
         }
 
-        ArticlePlatformContent platformContent = platformContentMapper.selectById(request.getPlatformContentId());
+        ArticlePlatformContent platformContent = getRequiredPlatformContent(request.getPlatformContentId());
+        PlatformAccount account = getRequiredAccount(request.getAccountId());
+        validatePlatformConsistency(platformContent, account);
+        return new ResolvedPublishResources(platformContent, account);
+    }
+
+    private ArticlePlatformContent getRequiredPlatformContent(Long id) {
+        ArticlePlatformContent platformContent = platformContentMapper.selectById(id);
         if (platformContent == null) {
             throw new BusinessException(ResultCode.NOT_FOUND, "平台发布稿不存在");
         }
-        PlatformAccount account = platformAccountMapper.selectById(request.getAccountId());
+        return platformContent;
+    }
+
+    private PlatformAccount getRequiredAccount(Long id) {
+        PlatformAccount account = platformAccountMapper.selectById(id);
         if (account == null) {
             throw new BusinessException(ResultCode.NOT_FOUND, "平台账号不存在");
         }
+        return account;
+    }
+
+    private void validatePlatformConsistency(ArticlePlatformContent platformContent, PlatformAccount account) {
         if (!platformContent.getPlatform().equals(account.getPlatform())) {
             throw new BusinessException("平台发布稿和平台账号不属于同一平台");
         }
-        return new ResolvedPublishResources(platformContent, account);
+    }
+
+    private void validateTaskResources(PublishTask task, ArticlePlatformContent platformContent, PlatformAccount account) {
+        if (!task.getPlatform().equals(platformContent.getPlatform())) {
+            throw new BusinessException("发布任务和平台发布稿不属于同一平台");
+        }
+        if (!task.getPlatform().equals(account.getPlatform())) {
+            throw new BusinessException("发布任务和平台账号不属于同一平台");
+        }
+    }
+
+    private PublishContext toPublishContext(PublishTask task, ArticlePlatformContent content, PlatformAccount account) {
+        return new PublishContext(
+                task.getId(),
+                task.getArticleId(),
+                task.getPlatformContentId(),
+                task.getPlatform(),
+                task.getAccountId(),
+                task.getTitle(),
+                content.getContent(),
+                content.getSummary(),
+                content.getTags(),
+                content.getKeywords(),
+                task.getPublishMode(),
+                StringUtils.hasText(account.getAuthConfig()),
+                account.getAccountName(),
+                account.getRemark(),
+                task.getScheduleTime()
+        );
     }
 
     private PublishTask getRequiredTask(Long id) {
