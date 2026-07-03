@@ -12,6 +12,7 @@ import {
   getArticleLanguageLabel,
   getArticleTypeLabel,
 } from '../../types/article';
+import PlatformContentSection from './PlatformContentSection';
 import './style.css';
 
 const { TextArea } = Input;
@@ -172,6 +173,7 @@ export default function ArticleEditor() {
           </Space>
         </Form>
       </SectionCard>
+      {articleId ? <PlatformContentSection articleId={articleId} /> : null}
     </PageContainer>
   );
 }

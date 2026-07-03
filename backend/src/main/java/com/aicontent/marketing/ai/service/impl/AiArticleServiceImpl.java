@@ -1,6 +1,7 @@
 package com.aicontent.marketing.ai.service.impl;
 
 import com.aicontent.marketing.ai.dto.AiArticleGenerateRequest;
+import com.aicontent.marketing.ai.parser.AiJsonParser;
 import com.aicontent.marketing.ai.prompt.PromptBuilder;
 import com.aicontent.marketing.ai.service.AiArticleService;
 import com.aicontent.marketing.ai.service.AiModelService;
@@ -12,7 +13,6 @@ import com.aicontent.marketing.article.vo.ArticleDetailVO;
 import com.aicontent.marketing.common.exception.BusinessException;
 import com.aicontent.marketing.product.service.ProductConfigService;
 import com.aicontent.marketing.product.vo.ProductConfigVO;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -25,20 +25,20 @@ public class AiArticleServiceImpl implements AiArticleService {
     private final ArticleService articleService;
     private final AiModelService aiModelService;
     private final PromptBuilder promptBuilder;
-    private final ObjectMapper objectMapper;
+    private final AiJsonParser aiJsonParser;
 
     public AiArticleServiceImpl(
             ProductConfigService productConfigService,
             ArticleService articleService,
             AiModelService aiModelService,
             PromptBuilder promptBuilder,
-            ObjectMapper objectMapper
+            AiJsonParser aiJsonParser
     ) {
         this.productConfigService = productConfigService;
         this.articleService = articleService;
         this.aiModelService = aiModelService;
         this.promptBuilder = promptBuilder;
-        this.objectMapper = objectMapper;
+        this.aiJsonParser = aiJsonParser;
     }
 
     @Override
@@ -51,7 +51,7 @@ public class AiArticleServiceImpl implements AiArticleService {
         String systemPrompt = promptBuilder.buildSystemPrompt();
         String userPrompt = promptBuilder.buildUserPrompt(productConfig, request);
         String rawResult = aiModelService.chat(systemPrompt, userPrompt);
-        AiGeneratedArticle generatedArticle = parseAiResult(rawResult);
+        AiGeneratedArticle generatedArticle = aiJsonParser.parseGeneratedArticle(rawResult);
 
         ArticleCreateRequest articleRequest = new ArticleCreateRequest();
         articleRequest.setTitle(requiredText(generatedArticle.getTitle(), "AI 返回标题为空，请重试"));
@@ -64,37 +64,6 @@ public class AiArticleServiceImpl implements AiArticleService {
 
         ArticleDetailVO article = articleService.createArticle(articleRequest, currentUserId);
         return AiArticleGenerateVO.from(article);
-    }
-
-    private AiGeneratedArticle parseAiResult(String rawResult) {
-        try {
-            AiGeneratedArticle article = objectMapper.readValue(cleanJson(rawResult), AiGeneratedArticle.class);
-            if (!StringUtils.hasText(article.getTitle()) || !StringUtils.hasText(article.getContent())) {
-                throw new BusinessException("AI 返回格式解析失败，请重试");
-            }
-            return article;
-        } catch (BusinessException exception) {
-            throw exception;
-        } catch (Exception exception) {
-            throw new BusinessException("AI 返回格式解析失败，请重试");
-        }
-    }
-
-    private String cleanJson(String rawResult) {
-        if (!StringUtils.hasText(rawResult)) {
-            throw new BusinessException("AI 返回内容为空，请重试");
-        }
-
-        String content = rawResult.trim();
-        if (content.startsWith("```json")) {
-            content = content.substring(7).trim();
-        } else if (content.startsWith("```")) {
-            content = content.substring(3).trim();
-        }
-        if (content.endsWith("```")) {
-            content = content.substring(0, content.length() - 3).trim();
-        }
-        return content;
     }
 
     private String requiredText(String value, String message) {

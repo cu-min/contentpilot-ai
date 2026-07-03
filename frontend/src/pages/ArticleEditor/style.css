@@ -13,3 +13,34 @@
   flex-direction: column;
   gap: 8px;
 }
+
+.platform-content-meta-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  width: 100%;
+}
+
+.platform-content-meta-row .ant-form-item {
+  margin-bottom: 0;
+}
+
+.platform-content-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.platform-content-markdown-editor.ant-input {
+  min-height: 420px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  line-height: 1.7;
+}
+
+@media (max-width: 992px) {
+  .platform-content-meta-row,
+  .platform-content-editor-grid {
+    grid-template-columns: 1fr;
+  }
+}

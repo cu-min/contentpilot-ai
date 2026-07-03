@@ -39,3 +39,22 @@ CREATE TABLE IF NOT EXISTS article (
     created_at DATETIME,
     updated_at DATETIME
 );
+
+CREATE TABLE IF NOT EXISTS article_platform_content (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    article_id BIGINT NOT NULL,
+    platform VARCHAR(50) NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    summary VARCHAR(500),
+    content LONGTEXT,
+    tags VARCHAR(500),
+    keywords VARCHAR(500),
+    status VARCHAR(30) NOT NULL,
+    created_by BIGINT,
+    updated_by BIGINT,
+    created_at DATETIME,
+    updated_at DATETIME,
+    UNIQUE KEY uk_article_platform (article_id, platform),
+    KEY idx_article_platform_content_article_id (article_id),
+    KEY idx_article_platform_content_status (status)
+);
