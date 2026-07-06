@@ -89,6 +89,16 @@ export default function Platform() {
 
   const handleSave = async () => {
     const values = await form.validateFields();
+    if (values.authConfig?.trim()) {
+      try {
+        JSON.parse(values.authConfig);
+      } catch {
+        const errorMessage = '认证配置必须是合法 JSON，请检查双引号、逗号和字段格式';
+        form.setFields([{ name: 'authConfig', errors: [errorMessage] }]);
+        message.error(errorMessage);
+        return;
+      }
+    }
     setSaving(true);
     try {
       if (editing) {

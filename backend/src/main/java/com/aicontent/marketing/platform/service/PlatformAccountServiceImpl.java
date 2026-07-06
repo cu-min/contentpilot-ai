@@ -10,6 +10,8 @@ import com.aicontent.marketing.platform.vo.PlatformAccountVO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -25,6 +27,13 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
     private static final Set<String> PLATFORMS = Set.of("WECHAT_OFFICIAL", "ZHIHU", "CSDN", "JUEJIN");
     private static final Set<String> AUTH_TYPES = Set.of("APP_SECRET", "COOKIE", "BROWSER_PROFILE", "API_KEY", "MANUAL");
     private static final Set<String> PUBLISH_MODES = Set.of("OFFICIAL_API", "UNOFFICIAL_API", "BROWSER_AUTOMATION", "MANUAL_CONFIRM");
+    private static final String AUTH_CONFIG_JSON_ERROR = "认证配置必须是合法 JSON，请检查双引号、逗号和字段格式";
+
+    private final ObjectMapper objectMapper;
+
+    public PlatformAccountServiceImpl(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     @Override
     public List<PlatformAccountVO> listAccounts(PlatformAccountQueryRequest request) {
@@ -136,6 +145,7 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
             throw new BusinessException("defaultPublishMode is invalid");
         }
         validateEnabled(request.getEnabled());
+        validateAuthConfig(request);
     }
 
     private void validatePlatform(String platform) {
@@ -148,5 +158,40 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
         if (!Integer.valueOf(0).equals(enabled) && !Integer.valueOf(1).equals(enabled)) {
             throw new BusinessException("enabled is invalid");
         }
+    }
+
+    private void validateAuthConfig(PlatformAccountSaveRequest request) {
+        if (!StringUtils.hasText(request.getAuthConfig())) {
+            return;
+        }
+        JsonNode root = parseAuthConfig(request.getAuthConfig());
+        if ("JUEJIN".equals(request.getPlatform()) && "UNOFFICIAL_API".equals(request.getDefaultPublishMode())) {
+            validateJuejinAuthConfig(root);
+        }
+    }
+
+    private JsonNode parseAuthConfig(String authConfig) {
+        try {
+            return objectMapper.readTree(authConfig);
+        } catch (Exception exception) {
+            throw new BusinessException(AUTH_CONFIG_JSON_ERROR);
+        }
+    }
+
+    private void validateJuejinAuthConfig(JsonNode root) {
+        if (!hasTextField(root, "cookie")) {
+            throw new BusinessException("掘金 Cookie 未配置，请在认证配置中填写 cookie");
+        }
+        if (!hasTextField(root, "draftId")) {
+            throw new BusinessException("掘金 draftId 未配置，请从掘金编辑器地址 /editor/drafts/{draftId} 中获取");
+        }
+        if (!hasTextField(root, "defaultCategoryId")) {
+            throw new BusinessException("掘金默认分类 ID 未配置，请从 article_draft/update 请求 Payload 的 category_id 中获取");
+        }
+    }
+
+    private boolean hasTextField(JsonNode root, String fieldName) {
+        JsonNode value = root.path(fieldName);
+        return value.isTextual() && StringUtils.hasText(value.asText());
     }
 }

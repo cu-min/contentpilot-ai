@@ -407,7 +407,25 @@ POST https://api.juejin.cn/content_api/v1/article/publish?aid=2608&uuid=
 - 阶段 10 暂不需要立即做，可作为 CSDN 自动填充可选阶段。
 - 当前 MVP 可以只打通掘金草稿发布后进入联调与演示优化。
 
-## 11. 参考资料与待确认项
+## 11. MVP 收尾验证记录
+
+阶段 9 已完成掘金已有草稿更新试点，用户已在本地验证：
+
+- 系统发布任务可以调用掘金 `article_draft/update`。
+- 掘金草稿内容可以被真实更新。
+- 用户已手动在掘金发布成功。
+- 当前 MVP 已跑通最小真实平台闭环。
+
+阶段 10 增加配置校验：
+
+- `auth_config` 必须是合法 JSON。
+- `JUEJIN + UNOFFICIAL_API` 至少需要 `cookie`、`draftId`、`defaultCategoryId`。
+- `draftOnly=true` 时只更新掘金草稿。
+- `draftOnly=false` 时 update 成功后可选调用 publish。
+- CSDN 自动填充仍作为后置可选。
+- 追踪链接、真实数据看板、操作日志仍不纳入当前 MVP。
+
+## 12. 参考资料与待确认项
 
 本阶段调研参考了已有项目文档 `docs/platform-publishing-strategy-reference.md`、当前代码中的发布执行框架，以及公开页面/资料方向：
 

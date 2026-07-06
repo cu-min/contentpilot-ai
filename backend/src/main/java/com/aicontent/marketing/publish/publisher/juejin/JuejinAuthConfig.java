@@ -56,19 +56,19 @@ public record JuejinAuthConfig(
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new BusinessException("掘金 auth_config JSON 解析失败");
+            throw new BusinessException("掘金 auth_config JSON 解析失败，请检查认证配置格式");
         }
     }
 
     private void validate() {
         if (!StringUtils.hasText(cookie)) {
-            throw new BusinessException("掘金 auth_config.cookie 必填");
+            throw new BusinessException("掘金 Cookie 未配置，请在平台账号认证配置中填写 cookie");
         }
         if (!StringUtils.hasText(draftId)) {
-            throw new BusinessException("掘金 auth_config.draftId 必填，请从 /editor/drafts/{draftId} 获取");
+            throw new BusinessException("掘金 draftId 未配置，请从 /editor/drafts/{draftId} 地址中获取");
         }
         if (!StringUtils.hasText(defaultCategoryId)) {
-            throw new BusinessException("掘金 auth_config.defaultCategoryId 必填");
+            throw new BusinessException("掘金默认分类 ID 未配置，请从 article_draft/update 请求 Payload 的 category_id 获取");
         }
     }
 

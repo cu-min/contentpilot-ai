@@ -96,12 +96,12 @@ public class JuejinClient {
 
             HttpResponse<String> response = send(config, "/article/publish", requestBody);
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new BusinessException("掘金正式发布失败，HTTP 状态码：" + response.statusCode());
+                throw new BusinessException("掘金正式发布失败，请检查 Cookie、csrfToken 或平台审核状态");
             }
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new BusinessException("掘金正式发布失败：" + safeMessage(exception));
+            throw new BusinessException("掘金正式发布失败，请检查 Cookie、csrfToken 或平台审核状态");
         }
     }
 
