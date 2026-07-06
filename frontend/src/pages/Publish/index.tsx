@@ -275,13 +275,13 @@ export default function Publish() {
     try {
       const result = await executePublishTask(record.id);
       if (result.data.status === 'SUCCESS') {
-        message.success('任务执行成功');
+        message.success('自动发布成功');
       } else {
-        message.error(`任务执行失败：${result.data.errorMessage || getPublishTaskStatusLabel(result.data.status) || '执行失败'}`);
+        message.error(`自动发布失败：${result.data.errorMessage || getPublishTaskStatusLabel(result.data.status) || '发布失败'}`);
       }
       await loadTasks();
     } catch (error) {
-      message.error(`任务执行失败：${getErrorText(error, '执行失败')}`);
+      message.error(`自动发布失败：${getErrorText(error, '发布失败')}`);
     } finally {
       setExecutingTaskId(null);
     }
@@ -340,8 +340,8 @@ export default function Publish() {
     if (record.status === 'PENDING') {
       return (
         <Space size={8} wrap>
-          <Popconfirm title="确认执行该发布任务？" okText="执行" cancelText="取消" onConfirm={() => handleExecute(record)}>
-            <Button size="small" type="primary" loading={executingTaskId === record.id}>执行</Button>
+          <Popconfirm title="确认自动发布该文章？" okText="自动发布" cancelText="取消" onConfirm={() => handleExecute(record)}>
+            <Button size="small" type="primary" loading={executingTaskId === record.id}>自动发布</Button>
           </Popconfirm>
           <Popconfirm title="确认取消该发布任务？" okText="取消任务" cancelText="返回" onConfirm={() => handleCancel(record)}>
             <Button size="small">取消</Button>
@@ -351,7 +351,7 @@ export default function Publish() {
     }
 
     if (record.status === 'RUNNING') {
-      return <Button size="small" disabled>执行中</Button>;
+      return <Button size="small" disabled>发布中</Button>;
     }
 
     if (record.status === 'SUCCESS') {
@@ -362,8 +362,8 @@ export default function Publish() {
       return (
         <Space size={8} wrap>
           <Button size="small" danger onClick={() => handleViewFailure(record)}>查看失败原因</Button>
-          <Popconfirm title="确认重新执行该发布任务？" okText="重试" cancelText="取消" onConfirm={() => handleExecute(record)}>
-            <Button size="small" loading={executingTaskId === record.id}>重试</Button>
+          <Popconfirm title="确认重新自动发布该文章？" okText="重新发布" cancelText="取消" onConfirm={() => handleExecute(record)}>
+            <Button size="small" loading={executingTaskId === record.id}>重新发布</Button>
           </Popconfirm>
         </Space>
       );
@@ -474,7 +474,7 @@ export default function Publish() {
   return (
     <PageContainer
       title="发布任务"
-      description="创建平台发布稿的发布任务草稿，手动执行待发布任务；掘金非官方 API 会创建新草稿并提交发布。"
+      description="创建平台发布稿的发布任务，提交后可自动完成掘金新草稿创建、内容更新与文章发布。"
     >
       <SectionCard>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -482,7 +482,7 @@ export default function Publish() {
             type="info"
             showIcon
             message="JUEJIN + UNOFFICIAL_API 会访问真实掘金接口。"
-            description="非掘金或未配置真实 Publisher 的组合仍会走 MockPublisher；掘金账号需要配置 cookie、defaultCategoryId、defaultTagIds，执行失败后可重试并复用已创建草稿。"
+            description="掘金账号需要配置 cookie、defaultCategoryId、defaultTagIds；发布失败后可重新发布，并复用已创建的发布记录。其他平台 Publisher 后续逐步接入。"
           />
           <Form form={filterForm} layout="inline" onFinish={() => loadTasks(1, pagination.pageSize)}>
             <Form.Item name="platform">

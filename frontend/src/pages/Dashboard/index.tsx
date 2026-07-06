@@ -13,7 +13,7 @@ const workflowSteps = [
   { title: '平台稿', description: '为不同平台重组内容', path: '/articles' },
   { title: '平台账号', description: '配置掘金等平台账号', path: '/platform' },
   { title: '发布任务', description: '创建任务并提交待执行', path: '/publish' },
-  { title: '执行发布', description: 'Mock 或掘金草稿更新', path: '/publish' },
+  { title: '执行发布', description: '掘金真实文章发布', path: '/publish' },
 ];
 
 export default function Dashboard() {
@@ -40,7 +40,7 @@ export default function Dashboard() {
   return (
     <PageContainer
       title="首页概览"
-      description="聚焦当前 MVP 主链路：从产品配置、AI 文章生成、多平台适配，到发布任务执行与掘金草稿更新。"
+      description="聚焦当前 MVP 主链路：从产品配置、AI 文章生成、多平台适配，到发布任务执行与掘金真实文章发布。"
     >
       <SectionCard className="dashboard-panel">
         <div className="dashboard-status">
@@ -67,12 +67,12 @@ export default function Dashboard() {
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <div className="dashboard-stat">
-              <Statistic title="真实平台试点" value="掘金草稿" />
+              <Statistic title="真实平台试点" value="掘金文章" />
             </div>
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <div className="dashboard-stat">
-              <Statistic title="发布模式" value="手动执行" />
+              <Statistic title="发布模式" value="自动发布" />
             </div>
           </Col>
           <Col xs={24} sm={12} lg={6}>
