@@ -1,6 +1,7 @@
 import {
   Alert,
   Button,
+  Empty,
   Form,
   Input,
   Modal,
@@ -34,6 +35,7 @@ import {
   getPlatformContentPlatformLabel,
   platformContentOptions,
 } from '../../types/platformContent';
+import { formatFailure } from '../../utils/feedback';
 
 const { TextArea } = Input;
 
@@ -95,7 +97,7 @@ export default function Platform() {
       } catch {
         const errorMessage = '认证配置必须是合法 JSON，请检查双引号、逗号和字段格式';
         form.setFields([{ name: 'authConfig', errors: [errorMessage] }]);
-        message.error(errorMessage);
+        message.error(`保存失败：${errorMessage}`);
         return;
       }
     }
@@ -103,17 +105,17 @@ export default function Platform() {
     try {
       if (editing) {
         await updatePlatformAccount(editing.id, values);
-        message.success('平台账号已更新');
+        message.success('保存成功');
       } else {
         await createPlatformAccount(values);
-        message.success('平台账号已创建');
+        message.success('保存成功');
       }
       setModalOpen(false);
       setEditing(null);
       form.resetFields();
       await loadAccounts();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '平台账号保存失败');
+      message.error(formatFailure('保存', error));
     } finally {
       setSaving(false);
     }
@@ -122,10 +124,10 @@ export default function Platform() {
   const handleStatusChange = async (record: PlatformAccount, checked: boolean) => {
     try {
       await updatePlatformAccountStatus(record.id, checked ? 1 : 0);
-      message.success(checked ? '账号已启用' : '账号已禁用');
+      message.success(checked ? '启用成功' : '禁用成功');
       await loadAccounts();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '状态更新失败');
+      message.error(formatFailure(checked ? '启用' : '禁用', error));
     }
   };
 
@@ -141,18 +143,21 @@ export default function Platform() {
     {
       title: '账号名称',
       dataIndex: 'accountName',
+      width: 220,
       ellipsis: true,
     },
     {
       title: '认证方式',
       dataIndex: 'authType',
       width: 150,
+      responsive: ['lg'],
       render: (value: string) => getAuthTypeLabel(value),
     },
     {
       title: '认证配置',
       dataIndex: 'authConfigConfigured',
       width: 120,
+      responsive: ['md'],
       render: (configured: boolean) => (
         <Tag color={configured ? 'warning' : 'default'}>
           {configured ? '已配置' : '未配置'}
@@ -180,7 +185,7 @@ export default function Platform() {
       title: '更新时间',
       dataIndex: 'updatedAt',
       width: 180,
-      responsive: ['md'],
+      responsive: ['xl'],
       render: (value?: string) => value || '-',
     },
     {
@@ -203,8 +208,8 @@ export default function Platform() {
           <Alert
             type="info"
             showIcon
-            message="本阶段仅保存平台账号配置，不验证账号可用性，也不调用任何真实平台接口。"
-            description="认证配置属于敏感信息，列表和详情均不会明文回显；编辑时留空表示保留原配置。"
+            message="平台账号配置会在发布任务执行时使用。"
+            description="认证配置属于敏感信息，列表和详情均不会明文回显；编辑时留空表示保留原配置。JUEJIN + UNOFFICIAL_API 会调用真实掘金接口。"
           />
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Typography.Text strong>平台账号列表</Typography.Text>
@@ -216,7 +221,15 @@ export default function Platform() {
             columns={columns}
             dataSource={accounts}
             pagination={false}
-            locale={{ emptyText: '暂无平台账号' }}
+            locale={{
+              emptyText: (
+                <Empty description="暂无平台账号配置">
+                  <Button type="primary" onClick={openCreate}>
+                    新增平台账号
+                  </Button>
+                </Empty>
+              ),
+            }}
           />
         </Space>
       </SectionCard>
@@ -263,11 +276,11 @@ export default function Platform() {
           <Form.Item
             label="认证配置"
             name="authConfig"
-            extra={editing ? '编辑时留空表示保留原认证配置。掘金试点需要 cookie、userAgent、csrfToken、draftId、defaultCategoryId，敏感信息不要提交到代码仓库。' : '建议使用 JSON 字符串保存本地测试配置。掘金试点需要 cookie、userAgent、csrfToken、draftId、defaultCategoryId。'}
+            extra={editing ? '编辑时留空表示保留原认证配置。掘金自动发布需要 cookie、defaultCategoryId、defaultTagIds，csrfToken 可选，敏感信息不要提交到代码仓库。' : '建议使用 JSON 字符串保存本地测试配置。掘金自动发布需要 cookie、defaultCategoryId、defaultTagIds，csrfToken 可选。'}
           >
             <TextArea
               rows={5}
-              placeholder='例如：{"draftId":"...","defaultCategoryId":"...","draftOnly":true}'
+              placeholder='例如：{"cookie":"本地填写","userAgent":"Mozilla/5.0 ...","csrfToken":"可选","aid":"2608","uuid":"","defaultCategoryId":"6809637776263217160","defaultTagIds":["6809640407484334093"],"draftOnly":false,"syncToOrg":false,"columnIds":[],"themeIds":[],"encryptedWordCount":1077883,"originWordCount":3}'
             />
           </Form.Item>
           <Form.Item label="启用状态" name="enabled" valuePropName="checked" getValueFromEvent={(checked) => (checked ? 1 : 0)} getValueProps={(value) => ({ checked: value === 1 })}>

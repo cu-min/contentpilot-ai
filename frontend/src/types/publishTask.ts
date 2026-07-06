@@ -30,6 +30,9 @@ export interface PublishTask {
   scheduleTime?: string;
   publishMode: PublishMode;
   publishUrl?: string;
+  externalDraftId?: string;
+  externalArticleId?: string;
+  draftUrl?: string;
   errorMessage?: string;
   createdBy?: number;
   updatedBy?: number;

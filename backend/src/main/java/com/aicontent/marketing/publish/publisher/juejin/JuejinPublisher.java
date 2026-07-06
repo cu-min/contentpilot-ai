@@ -34,29 +34,46 @@ public class JuejinPublisher implements PlatformPublisher {
 
     @Override
     public PublishResult publish(PublishContext context) {
+        String draftId = context.externalDraftId();
+        String draftUrl = context.draftUrl();
         try {
             validateContext(context);
             JuejinAuthConfig config = JuejinAuthConfig.parse(context.accountAuthConfig(), objectMapper);
+
+            if (!StringUtils.hasText(draftId)) {
+                JuejinClient.JuejinDraftCreateResult createResult = juejinClient.createDraft(config);
+                draftId = createResult.draftId();
+                draftUrl = draftUrl(draftId);
+            } else if (!StringUtils.hasText(draftUrl)) {
+                draftUrl = draftUrl(draftId);
+            }
+
             JuejinClient.JuejinDraftUpdateResult updateResult = juejinClient.updateDraft(
                     config,
+                    draftId,
                     new JuejinClient.JuejinDraftUpdateRequest(
                             normalize(context.title(), "未命名掘金草稿"),
                             normalize(context.summary(), ""),
                             normalize(context.content(), "")
                     )
             );
+            draftId = updateResult.draftId();
+            draftUrl = draftUrl(draftId);
 
-            if (!config.draftOnly()) {
-                juejinClient.publishArticle(config);
+            if (config.draftOnly()) {
+                return PublishResult.success(draftUrl, draftId, draftUrl, null, "掘金草稿创建并更新成功");
             }
 
-            String draftUrl = "https://juejin.cn/editor/drafts/" + updateResult.draftId();
-            String message = config.draftOnly() ? "掘金草稿更新成功" : "掘金草稿更新并提交发布成功";
-            return PublishResult.success(draftUrl, message);
+            JuejinClient.JuejinPublishResult publishResult = juejinClient.publishArticle(config, draftId);
+            String articleId = publishResult.articleId();
+            if (StringUtils.hasText(articleId)) {
+                return PublishResult.success(articleUrl(articleId), draftId, draftUrl, articleId, "掘金文章发布成功");
+            }
+            return PublishResult.success(draftUrl, draftId, draftUrl, null, "掘金文章发布成功，但响应中未返回正式文章 ID");
         } catch (BusinessException exception) {
-            return PublishResult.failed(exception.getMessage());
+            return PublishResult.failed(exception.getMessage(), draftId, draftUrl, null);
         } catch (Exception exception) {
-            return PublishResult.failed("掘金发布失败：" + safeMessage(exception));
+            return PublishResult.failed("掘金发布失败：" + safeMessage(exception), draftId, draftUrl, null);
         }
     }
 
@@ -77,6 +94,14 @@ public class JuejinPublisher implements PlatformPublisher {
 
     private String normalize(String value, String defaultValue) {
         return StringUtils.hasText(value) ? value : defaultValue;
+    }
+
+    private String draftUrl(String draftId) {
+        return "https://juejin.cn/editor/drafts/" + draftId;
+    }
+
+    private String articleUrl(String articleId) {
+        return "https://juejin.cn/post/" + articleId;
     }
 
     private String safeMessage(Exception exception) {

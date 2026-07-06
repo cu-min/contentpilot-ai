@@ -2,6 +2,7 @@ import {
   Alert,
   Button,
   Checkbox,
+  Empty,
   Form,
   Input,
   Modal,
@@ -31,6 +32,7 @@ import type {
   PlatformContentPlatform,
   PlatformContentUpdatePayload,
 } from '../../types/platformContent';
+import { formatFailure } from '../../utils/feedback';
 import {
   getPlatformContentPlatformLabel,
   getPlatformContentStatusLabel,
@@ -78,12 +80,12 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
     setGenerating(true);
     try {
       await generatePlatformContents(articleId, values);
-      message.success('平台发布稿生成成功');
+      message.success('适配成功');
       setGenerateOpen(false);
       generateForm.resetFields();
       await loadItems();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '平台发布稿生成失败');
+      message.error(formatFailure('适配', error));
     } finally {
       setGenerating(false);
     }
@@ -112,12 +114,12 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
     setSaving(true);
     try {
       await updatePlatformContent(current.id, values);
-      message.success('平台发布稿保存成功');
+      message.success('保存成功');
       setEditOpen(false);
       setCurrent(null);
       await loadItems();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '平台发布稿保存失败');
+      message.error(formatFailure('保存', error));
     } finally {
       setSaving(false);
     }
@@ -126,20 +128,20 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
   const handleArchive = async (record: ArticlePlatformContent) => {
     try {
       await archivePlatformContent(record.id);
-      message.success('平台发布稿已归档');
+      message.success('归档成功');
       await loadItems();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '归档失败');
+      message.error(formatFailure('归档', error));
     }
   };
 
   const handleRestore = async (record: ArticlePlatformContent) => {
     try {
       await restorePlatformContent(record.id);
-      message.success('平台发布稿已恢复');
+      message.success('恢复成功');
       await loadItems();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '恢复失败');
+      message.error(formatFailure('恢复', error));
     }
   };
 
@@ -155,13 +157,15 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
     {
       title: '标题',
       dataIndex: 'title',
+      width: 220,
       ellipsis: true,
     },
     {
       title: '摘要',
       dataIndex: 'summary',
+      width: 260,
       ellipsis: true,
-      responsive: ['lg'],
+      responsive: ['xl'],
     },
     {
       title: '状态',
@@ -177,7 +181,7 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
       title: '更新时间',
       dataIndex: 'updatedAt',
       width: 180,
-      responsive: ['md'],
+      responsive: ['lg'],
       render: (value?: string) => value || '-',
     },
     {
@@ -228,7 +232,15 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
           columns={columns}
           dataSource={items}
           pagination={false}
-          locale={{ emptyText: '暂无平台发布稿' }}
+          locale={{
+            emptyText: (
+              <Empty description="暂无平台稿内容">
+                <Button type="primary" onClick={() => setGenerateOpen(true)}>
+                  生成平台稿
+                </Button>
+              </Empty>
+            ),
+          }}
         />
       </SectionCard>
 

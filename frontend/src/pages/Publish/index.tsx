@@ -2,6 +2,7 @@ import {
   Alert,
   Button,
   DatePicker,
+  Empty,
   Form,
   Input,
   Modal,
@@ -16,7 +17,7 @@ import {
 import type { TableColumnsType } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getArticles } from '../../api/article';
 import { getPlatformAccounts } from '../../api/platformAccount';
 import { getArticlePlatformContents, getPlatformContentDetail } from '../../api/platformContent';
@@ -43,6 +44,7 @@ import {
   publishTaskStatusOptions,
   publishTypeOptions,
 } from '../../types/publishTask';
+import { formatFailure, getErrorText } from '../../utils/feedback';
 
 interface PublishTaskFormValues {
   articleId?: number;
@@ -54,6 +56,7 @@ interface PublishTaskFormValues {
 }
 
 export default function Publish() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [form] = Form.useForm<PublishTaskFormValues>();
   const [filterForm] = Form.useForm();
@@ -231,17 +234,17 @@ export default function Publish() {
     try {
       if (editing) {
         await updatePublishTask(editing.id, normalizePayload(values));
-        message.success('发布任务已更新');
+        message.success('保存成功');
       } else {
         await createPublishTask(normalizePayload(values));
-        message.success('发布任务草稿已创建');
+        message.success('保存成功');
       }
       setModalOpen(false);
       setEditing(null);
       form.resetFields();
       await loadTasks(1, pagination.pageSize);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '发布任务保存失败');
+      message.error(formatFailure('保存', error));
     } finally {
       setSaving(false);
     }
@@ -250,20 +253,20 @@ export default function Publish() {
   const handleSubmit = async (record: PublishTask) => {
     try {
       await submitPublishTask(record.id);
-      message.success('发布任务已提交为待发布');
+      message.success('任务提交成功');
       await loadTasks();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '提交失败');
+      message.error(formatFailure('任务提交', error));
     }
   };
 
   const handleCancel = async (record: PublishTask) => {
     try {
       await cancelPublishTask(record.id);
-      message.success('发布任务已取消');
+      message.success('取消成功');
       await loadTasks();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '取消失败');
+      message.error(formatFailure('取消', error));
     }
   };
 
@@ -272,38 +275,118 @@ export default function Publish() {
     try {
       const result = await executePublishTask(record.id);
       if (result.data.status === 'SUCCESS') {
-        message.success('MockPublisher 模拟发布成功');
+        message.success('任务执行成功');
       } else {
-        message.error(result.data.errorMessage || 'MockPublisher 模拟发布失败');
+        message.error(`任务执行失败：${result.data.errorMessage || getPublishTaskStatusLabel(result.data.status) || '执行失败'}`);
       }
       await loadTasks();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '执行失败');
+      message.error(`任务执行失败：${getErrorText(error, '执行失败')}`);
     } finally {
       setExecutingTaskId(null);
     }
   };
+
+  const isFailureStatus = (status: PublishTaskStatus) => (
+    [
+      'FAILED',
+      'NEED_LOGIN',
+      'NEED_CAPTCHA',
+      'NEED_MANUAL_CONFIRM',
+      'LINK_FETCH_FAILED',
+      'CONTENT_REJECTED',
+    ] as PublishTaskStatus[]
+  ).includes(status);
 
   const statusColor = (status: PublishTaskStatus) => {
     if (status === 'DRAFT') return 'default';
     if (status === 'PENDING') return 'processing';
     if (status === 'RUNNING') return 'blue';
     if (status === 'SUCCESS') return 'success';
-    if (status === 'FAILED') return 'error';
+    if (isFailureStatus(status)) return 'error';
     if (status === 'CANCELLED') return 'warning';
     return 'default';
+  };
+
+  const handleViewResult = (record: PublishTask) => {
+    const url = record.publishUrl || record.draftUrl;
+    if (!url) {
+      message.info('暂无结果链接');
+      return;
+    }
+    window.open(url, '_blank', 'noreferrer');
+  };
+
+  const handleViewFailure = (record: PublishTask) => {
+    Modal.error({
+      title: '失败原因',
+      content: record.errorMessage || getPublishTaskStatusLabel(record.status) || '暂无失败原因',
+    });
+  };
+
+  const renderTaskActions = (record: PublishTask) => {
+    if (record.status === 'DRAFT') {
+      return (
+        <Space size={8} wrap>
+          <Button size="small" onClick={() => openEdit(record)}>编辑</Button>
+          <Button size="small" type="primary" onClick={() => handleSubmit(record)}>提交</Button>
+          <Popconfirm title="确认取消该发布任务？" okText="取消任务" cancelText="返回" onConfirm={() => handleCancel(record)}>
+            <Button size="small">取消</Button>
+          </Popconfirm>
+        </Space>
+      );
+    }
+
+    if (record.status === 'PENDING') {
+      return (
+        <Space size={8} wrap>
+          <Popconfirm title="确认执行该发布任务？" okText="执行" cancelText="取消" onConfirm={() => handleExecute(record)}>
+            <Button size="small" type="primary" loading={executingTaskId === record.id}>执行</Button>
+          </Popconfirm>
+          <Popconfirm title="确认取消该发布任务？" okText="取消任务" cancelText="返回" onConfirm={() => handleCancel(record)}>
+            <Button size="small">取消</Button>
+          </Popconfirm>
+        </Space>
+      );
+    }
+
+    if (record.status === 'RUNNING') {
+      return <Button size="small" disabled>执行中</Button>;
+    }
+
+    if (record.status === 'SUCCESS') {
+      return <Button size="small" onClick={() => handleViewResult(record)}>查看结果</Button>;
+    }
+
+    if (isFailureStatus(record.status)) {
+      return (
+        <Space size={8} wrap>
+          <Button size="small" danger onClick={() => handleViewFailure(record)}>查看失败原因</Button>
+          <Popconfirm title="确认重新执行该发布任务？" okText="重试" cancelText="取消" onConfirm={() => handleExecute(record)}>
+            <Button size="small" loading={executingTaskId === record.id}>重试</Button>
+          </Popconfirm>
+        </Space>
+      );
+    }
+
+    if (record.status === 'CANCELLED') {
+      return <Typography.Text type="secondary">不可操作</Typography.Text>;
+    }
+
+    return <Typography.Text type="secondary">不可操作</Typography.Text>;
   };
 
   const columns: TableColumnsType<PublishTask> = [
     {
       title: '任务标题',
       dataIndex: 'title',
+      width: 220,
       ellipsis: true,
     },
     {
       title: '平台',
       dataIndex: 'platform',
-      width: 130,
+      width: 110,
       render: (platform: PlatformContentPlatform) => (
         <Tag color="processing">{getPlatformContentPlatformLabel(platform)}</Tag>
       ),
@@ -311,13 +394,13 @@ export default function Publish() {
     {
       title: '账号',
       dataIndex: 'accountName',
-      width: 150,
+      width: 130,
       ellipsis: true,
     },
     {
       title: '状态',
       dataIndex: 'status',
-      width: 110,
+      width: 100,
       render: (status: PublishTaskStatus) => (
         <Tag color={statusColor(status)}>{getPublishTaskStatusLabel(status)}</Tag>
       ),
@@ -325,40 +408,56 @@ export default function Publish() {
     {
       title: '发布类型',
       dataIndex: 'publishType',
-      width: 120,
+      width: 100,
+      responsive: ['md'],
       render: (type: PublishType) => <Tag>{getPublishTypeLabel(type)}</Tag>,
     },
     {
       title: '发布方式',
       dataIndex: 'publishMode',
-      width: 150,
+      width: 120,
+      responsive: ['lg'],
       render: (mode: string) => <Tag>{getPublishModeLabel(mode)}</Tag>,
     },
     {
       title: '计划时间',
       dataIndex: 'scheduleTime',
-      width: 180,
-      responsive: ['md'],
+      width: 150,
+      responsive: ['xl'],
       render: (value?: string) => value || '-',
     },
     {
       title: '发布结果',
       key: 'publishResult',
-      width: 210,
+      width: 180,
       responsive: ['lg'],
       render: (_, record) => {
         if (record.status === 'SUCCESS' && record.publishUrl) {
           return (
             <Typography.Link href={record.publishUrl} target="_blank" rel="noreferrer">
-              Mock 链接
+              查看文章
             </Typography.Link>
           );
         }
-        if (record.status === 'FAILED') {
+        if (record.status === 'SUCCESS' && record.draftUrl) {
           return (
-            <Typography.Text type="danger" ellipsis={{ tooltip: record.errorMessage }}>
-              {record.errorMessage || '执行失败'}
-            </Typography.Text>
+            <Typography.Link href={record.draftUrl} target="_blank" rel="noreferrer">
+              查看草稿
+            </Typography.Link>
+          );
+        }
+        if (isFailureStatus(record.status)) {
+          return (
+            <Space size={6} wrap>
+              {record.draftUrl ? (
+                <Typography.Link href={record.draftUrl} target="_blank" rel="noreferrer">
+                  草稿
+                </Typography.Link>
+              ) : null}
+              <Typography.Text type="danger" ellipsis={{ tooltip: record.errorMessage }}>
+                {record.errorMessage || getPublishTaskStatusLabel(record.status) || '执行失败'}
+              </Typography.Text>
+            </Space>
           );
         }
         return '-';
@@ -367,36 +466,23 @@ export default function Publish() {
     {
       title: '操作',
       key: 'action',
-      width: 300,
-      render: (_, record) => (
-        <Space size={8}>
-          <Button size="small" disabled={record.status !== 'DRAFT'} onClick={() => openEdit(record)}>编辑</Button>
-          <Button size="small" type="primary" disabled={record.status !== 'DRAFT'} onClick={() => handleSubmit(record)}>提交</Button>
-          {record.status === 'PENDING' ? (
-            <Popconfirm title="确认执行该发布任务？" okText="执行" cancelText="取消" onConfirm={() => handleExecute(record)}>
-              <Button size="small" loading={executingTaskId === record.id}>执行任务</Button>
-            </Popconfirm>
-          ) : null}
-          <Popconfirm title="确认取消该发布任务？" okText="取消任务" cancelText="返回" onConfirm={() => handleCancel(record)}>
-            <Button size="small" disabled={!['DRAFT', 'PENDING'].includes(record.status)}>取消</Button>
-          </Popconfirm>
-        </Space>
-      ),
+      width: 210,
+      render: (_, record) => renderTaskActions(record),
     },
   ];
 
   return (
     <PageContainer
       title="发布任务"
-      description="创建平台发布稿的发布任务草稿，手动执行待发布任务，并用 MockPublisher 验证内部执行链路。"
+      description="创建平台发布稿的发布任务草稿，手动执行待发布任务；掘金非官方 API 会创建新草稿并提交发布。"
     >
       <SectionCard>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Alert
             type="info"
             showIcon
-            message="本阶段执行按钮只调用 MockPublisher，不会访问任何真实平台。"
-            description="PENDING 任务可以手动执行；成功会写入 mock 链接，标题、摘要、正文、标签、关键词或账号备注包含 mock-fail 时会模拟失败。"
+            message="JUEJIN + UNOFFICIAL_API 会访问真实掘金接口。"
+            description="非掘金或未配置真实 Publisher 的组合仍会走 MockPublisher；掘金账号需要配置 cookie、defaultCategoryId、defaultTagIds，执行失败后可重试并复用已创建草稿。"
           />
           <Form form={filterForm} layout="inline" onFinish={() => loadTasks(1, pagination.pageSize)}>
             <Form.Item name="platform">
@@ -442,6 +528,15 @@ export default function Publish() {
             loading={loading}
             columns={columns}
             dataSource={tasks}
+            locale={{
+              emptyText: (
+                <Empty description="暂无发布任务">
+                  <Button type="primary" onClick={() => navigate('/articles')}>
+                    去文章详情创建任务
+                  </Button>
+                </Empty>
+              ),
+            }}
             pagination={{
               current: pagination.current,
               pageSize: pagination.pageSize,

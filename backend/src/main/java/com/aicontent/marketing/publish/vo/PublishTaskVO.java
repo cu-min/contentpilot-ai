@@ -36,6 +36,12 @@ public class PublishTaskVO {
 
     private String publishUrl;
 
+    private String externalDraftId;
+
+    private String externalArticleId;
+
+    private String draftUrl;
+
     private String errorMessage;
 
     private Long createdBy;
@@ -61,6 +67,9 @@ public class PublishTaskVO {
         vo.setScheduleTime(task.getScheduleTime());
         vo.setPublishMode(task.getPublishMode());
         vo.setPublishUrl(task.getPublishUrl());
+        vo.setExternalDraftId(task.getExternalDraftId());
+        vo.setExternalArticleId(task.getExternalArticleId());
+        vo.setDraftUrl(task.getDraftUrl());
         vo.setErrorMessage(task.getErrorMessage());
         vo.setCreatedBy(task.getCreatedBy());
         vo.setUpdatedBy(task.getUpdatedBy());

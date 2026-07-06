@@ -1,20 +1,17 @@
-import { Button, Form, Input, Modal, Select, Space, Table, Typography, message } from 'antd';
+import { Button, Empty, Form, Input, Modal, Select, Space, Table, Typography, message } from 'antd';
 import type { TableProps } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { archiveArticle, getArticles, restoreArticle } from '../../api/article';
-import { ArticleTypeTag, LanguageTag, StatusTag } from '../../components/ArticleMetaTag';
+import { StatusTag } from '../../components/ArticleMetaTag';
 import PageContainer from '../../components/PageContainer';
 import SectionCard from '../../components/SectionCard';
 import type { ArticleListItem, ArticleQuery } from '../../types/article';
 import {
-  articleLanguageOptions,
   articleStatusOptions,
-  articleTypeOptions,
-  getArticleLanguageLabel,
   getArticleStatusLabel,
-  getArticleTypeLabel,
 } from '../../types/article';
+import { formatFailure } from '../../utils/feedback';
 
 export default function Article() {
   const navigate = useNavigate();
@@ -32,8 +29,6 @@ export default function Article() {
         size,
         keyword: values.keyword,
         status: values.status,
-        type: values.type,
-        language: values.language,
       });
       setArticles(result.data.records);
       setPagination({
@@ -59,9 +54,13 @@ export default function Article() {
       okText: '归档',
       cancelText: '取消',
       onOk: async () => {
-        await archiveArticle(article.id);
-        message.success('文章已归档');
-        await loadArticles();
+        try {
+          await archiveArticle(article.id);
+          message.success('归档成功');
+          await loadArticles();
+        } catch (error) {
+          message.error(formatFailure('归档', error));
+        }
       },
     });
   };
@@ -69,41 +68,28 @@ export default function Article() {
   const handleRestore = async (article: ArticleListItem) => {
     try {
       await restoreArticle(article.id);
-      message.success('文章已恢复为草稿');
+      message.success('恢复成功');
       await loadArticles();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '文章恢复失败');
+      message.error(formatFailure('恢复', error));
     }
+  };
+
+  const formatLatestTime = (record: ArticleListItem) => {
+    const value = record.updatedAt || record.createdAt;
+    return value ? value.replace('T', ' ') : '-';
   };
 
   const columns: TableProps<ArticleListItem>['columns'] = [
     {
       title: '标题',
       dataIndex: 'title',
-      width: 220,
+      width: 260,
       render: (value, record) => (
         <Button type="link" className="table-link-button" onClick={() => navigate(`/articles/${record.id}`)}>
           {value}
         </Button>
       ),
-    },
-    {
-      title: '摘要',
-      dataIndex: 'summary',
-      ellipsis: true,
-      render: (value) => value || '-',
-    },
-    {
-      title: '类型',
-      dataIndex: 'type',
-      width: 120,
-      render: (type) => <ArticleTypeTag type={type} />,
-    },
-    {
-      title: '语言',
-      dataIndex: 'language',
-      width: 90,
-      render: (language) => <LanguageTag language={language} />,
     },
     {
       title: '状态',
@@ -118,16 +104,10 @@ export default function Article() {
       render: (value) => value || '-',
     },
     {
-      title: '创建时间',
-      dataIndex: 'createdAt',
+      title: '最新时间',
+      key: 'latestTime',
       width: 170,
-      render: (value) => value ? value.replace('T', ' ') : '-',
-    },
-    {
-      title: '更新时间',
-      dataIndex: 'updatedAt',
-      width: 170,
-      render: (value) => value ? value.replace('T', ' ') : '-',
+      render: (_, record) => formatLatestTime(record),
     },
     {
       title: '操作',
@@ -156,19 +136,24 @@ export default function Article() {
   return (
     <PageContainer
       title="文章库"
-      description="管理手动创建和编辑的营销文章。当前阶段用于打通文章列表、详情、Markdown 编辑与预览。"
+      description="统一管理手动创建和 AI 生成的营销文章，支持查看、编辑、归档和恢复。"
     >
       <SectionCard className="article-list-card">
         <Space direction="vertical" size={18} style={{ width: '100%' }}>
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Typography.Text strong>文章列表</Typography.Text>
-            <Button type="primary" onClick={() => navigate('/articles/new')}>
-              新建文章
-            </Button>
+            <Space>
+              <Button type="primary" onClick={() => navigate('/ai-generate')}>
+                AI生成文章
+              </Button>
+              <Button onClick={() => navigate('/articles/new')}>
+                手动新建文章
+              </Button>
+            </Space>
           </Space>
           <Form form={form} layout="inline" onFinish={() => void loadArticles(1, pagination.pageSize)}>
             <Form.Item name="keyword">
-              <Input.Search placeholder="搜索标题、摘要、标签或关键词" allowClear onSearch={() => void loadArticles(1, pagination.pageSize)} />
+              <Input.Search placeholder="搜索标题、标签或关键词" allowClear onSearch={() => void loadArticles(1, pagination.pageSize)} />
             </Form.Item>
             <Form.Item name="status">
               <Select
@@ -178,28 +163,6 @@ export default function Article() {
                 options={articleStatusOptions.map((option) => ({
                   value: option.value,
                   label: getArticleStatusLabel(option.value),
-                }))}
-              />
-            </Form.Item>
-            <Form.Item name="type">
-              <Select
-                allowClear
-                placeholder="类型"
-                style={{ width: 150 }}
-                options={articleTypeOptions.map((option) => ({
-                  value: option.value,
-                  label: getArticleTypeLabel(option.value),
-                }))}
-              />
-            </Form.Item>
-            <Form.Item name="language">
-              <Select
-                allowClear
-                placeholder="语言"
-                style={{ width: 110 }}
-                options={articleLanguageOptions.map((option) => ({
-                  value: option.value,
-                  label: getArticleLanguageLabel(option.value),
                 }))}
               />
             </Form.Item>
@@ -224,7 +187,15 @@ export default function Article() {
             loading={loading}
             columns={columns}
             dataSource={articles}
-            scroll={{ x: 1260 }}
+            locale={{
+              emptyText: (
+                <Empty description="暂无文章">
+                  <Button type="primary" onClick={() => navigate('/ai-generate')}>
+                    去生成文章
+                  </Button>
+                </Empty>
+              ),
+            }}
             pagination={{
               current: pagination.current,
               pageSize: pagination.pageSize,

@@ -34,6 +34,12 @@ public class PublishTask {
 
     private String publishUrl;
 
+    private String externalDraftId;
+
+    private String externalArticleId;
+
+    private String draftUrl;
+
     private String errorMessage;
 
     private Long createdBy;

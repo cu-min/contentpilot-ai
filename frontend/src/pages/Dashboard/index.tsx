@@ -54,7 +54,7 @@ export default function Dashboard() {
             </Typography.Paragraph>
           </div>
           <Space wrap>
-            <Button type="primary" onClick={() => navigate('/ai-generate')}>生成文章</Button>
+            <Button type="primary" onClick={() => navigate('/ai-generate')}>AI生成文章</Button>
             <Button onClick={() => navigate('/publish')}>查看发布任务</Button>
           </Space>
         </div>

@@ -151,8 +151,8 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     @Override
     public PublishTaskVO executeTask(Long id, Long currentUserId) {
         PublishTask task = getRequiredTask(id);
-        if (!STATUS_PENDING.equals(task.getStatus())) {
-            throw new BusinessException("只有待执行状态的发布任务可以执行");
+        if (!STATUS_PENDING.equals(task.getStatus()) && !STATUS_FAILED.equals(task.getStatus())) {
+            throw new BusinessException("只有待执行或执行失败的发布任务可以执行");
         }
 
         ArticlePlatformContent platformContent = getRequiredPlatformContent(task.getPlatformContentId());
@@ -162,6 +162,7 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         LocalDateTime now = LocalDateTime.now();
         task.setStatus(STATUS_RUNNING);
         task.setPublishUrl(null);
+        task.setExternalArticleId(null);
         task.setErrorMessage(null);
         task.setUpdatedBy(currentUserId);
         task.setUpdatedAt(now);
@@ -170,6 +171,7 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         PlatformPublisher publisher = publisherRegistry.getPublisher(task.getPlatform(), task.getPublishMode());
         try {
             PublishResult result = publisher.publish(toPublishContext(task, platformContent, account));
+            fillExternalResult(task, result);
             if (result.success()) {
                 task.setStatus(STATUS_SUCCESS);
                 task.setPublishUrl(result.publishUrl());
@@ -188,6 +190,18 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         task.setUpdatedAt(LocalDateTime.now());
         updateById(task);
         return toVO(task);
+    }
+
+    private void fillExternalResult(PublishTask task, PublishResult result) {
+        if (StringUtils.hasText(result.draftId())) {
+            task.setExternalDraftId(result.draftId());
+        }
+        if (StringUtils.hasText(result.draftUrl())) {
+            task.setDraftUrl(result.draftUrl());
+        }
+        if (StringUtils.hasText(result.articleId())) {
+            task.setExternalArticleId(result.articleId());
+        }
     }
 
     private void fillTask(
@@ -267,6 +281,9 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
                 content.getTags(),
                 content.getKeywords(),
                 task.getPublishMode(),
+                task.getExternalDraftId(),
+                task.getExternalArticleId(),
+                task.getDraftUrl(),
                 StringUtils.hasText(account.getAuthConfig()),
                 account.getAuthConfig(),
                 account.getAccountName(),

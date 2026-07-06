@@ -44,7 +44,7 @@ public record JuejinAuthConfig(
                     text(root, "draftId", null),
                     text(root, "defaultCategoryId", null),
                     stringList(root.path("defaultTagIds")),
-                    bool(root, "draftOnly", true),
+                    bool(root, "draftOnly", false),
                     bool(root, "syncToOrg", false),
                     stringList(root.path("columnIds")),
                     stringList(root.path("themeIds")),
@@ -64,11 +64,11 @@ public record JuejinAuthConfig(
         if (!StringUtils.hasText(cookie)) {
             throw new BusinessException("掘金 Cookie 未配置，请在平台账号认证配置中填写 cookie");
         }
-        if (!StringUtils.hasText(draftId)) {
-            throw new BusinessException("掘金 draftId 未配置，请从 /editor/drafts/{draftId} 地址中获取");
-        }
         if (!StringUtils.hasText(defaultCategoryId)) {
             throw new BusinessException("掘金默认分类 ID 未配置，请从 article_draft/update 请求 Payload 的 category_id 获取");
+        }
+        if (!draftOnly && defaultTagIds.isEmpty()) {
+            throw new BusinessException("掘金自动发布需要至少配置一个默认标签 ID");
         }
     }
 
@@ -107,6 +107,8 @@ public record JuejinAuthConfig(
         List<String> result = new ArrayList<>();
         value.forEach(item -> {
             if (item.isTextual() && StringUtils.hasText(item.asText())) {
+                result.add(item.asText());
+            } else if (item.canConvertToLong()) {
                 result.add(item.asText());
             }
         });

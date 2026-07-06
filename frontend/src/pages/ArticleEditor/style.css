@@ -1,5 +1,5 @@
 .article-editor-card.ant-card {
-  max-width: 1180px;
+  max-width: none;
 }
 
 .markdown-editor.ant-input {

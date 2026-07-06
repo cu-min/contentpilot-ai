@@ -7,6 +7,7 @@ body,
 #root {
   min-height: 100%;
   margin: 0;
+  overflow-x: hidden;
 }
 
 body {
@@ -31,4 +32,12 @@ body {
   padding: 0;
   white-space: normal;
   text-align: left;
+}
+
+.ant-table-wrapper {
+  max-width: 100%;
+}
+
+.ant-table-cell {
+  overflow-wrap: anywhere;
 }

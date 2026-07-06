@@ -182,11 +182,11 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
         if (!hasTextField(root, "cookie")) {
             throw new BusinessException("掘金 Cookie 未配置，请在认证配置中填写 cookie");
         }
-        if (!hasTextField(root, "draftId")) {
-            throw new BusinessException("掘金 draftId 未配置，请从掘金编辑器地址 /editor/drafts/{draftId} 中获取");
-        }
         if (!hasTextField(root, "defaultCategoryId")) {
             throw new BusinessException("掘金默认分类 ID 未配置，请从 article_draft/update 请求 Payload 的 category_id 中获取");
+        }
+        if (!root.path("defaultTagIds").isArray() || root.path("defaultTagIds").isEmpty()) {
+            throw new BusinessException("掘金默认标签 ID 未配置，请至少填写一个 defaultTagIds");
         }
     }
 

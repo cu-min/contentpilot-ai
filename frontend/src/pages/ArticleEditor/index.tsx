@@ -12,6 +12,7 @@ import {
   getArticleLanguageLabel,
   getArticleTypeLabel,
 } from '../../types/article';
+import { formatFailure } from '../../utils/feedback';
 import PlatformContentSection from './PlatformContentSection';
 import './style.css';
 
@@ -62,14 +63,14 @@ export default function ArticleEditor() {
     try {
       if (articleId) {
         await updateArticle(articleId, values);
-        message.success('文章保存成功');
+        message.success('保存成功');
       } else {
         const result = await createArticle(values);
-        message.success('文章创建成功');
+        message.success('保存成功');
         navigate(`/articles/${result.data.id}`, { replace: true });
       }
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '文章保存失败');
+      message.error(formatFailure('保存', error));
     } finally {
       setSaving(false);
     }
