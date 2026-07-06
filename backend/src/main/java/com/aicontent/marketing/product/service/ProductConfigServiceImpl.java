@@ -14,6 +14,7 @@ import org.springframework.util.StringUtils;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 public class ProductConfigServiceImpl extends ServiceImpl<ProductConfigMapper, ProductConfig> implements ProductConfigService {
@@ -28,13 +29,73 @@ public class ProductConfigServiceImpl extends ServiceImpl<ProductConfigMapper, P
     public ProductConfigVO saveCurrentConfig(ProductConfigSaveRequest request) {
         validateOfficialUrl(request.getOfficialUrl());
         ProductConfig config = getFirstConfig();
-        LocalDateTime now = LocalDateTime.now();
 
         if (config == null) {
-            config = new ProductConfig();
-            config.setCreatedAt(now);
+            return createConfig(request);
         }
 
+        return updateConfig(config.getId(), request);
+    }
+
+    @Override
+    public List<ProductConfigVO> listConfigs() {
+        return list(new LambdaQueryWrapper<ProductConfig>()
+                .orderByDesc(ProductConfig::getUpdatedAt)
+                .orderByDesc(ProductConfig::getId))
+                .stream()
+                .map(ProductConfigVO::from)
+                .toList();
+    }
+
+    @Override
+    public ProductConfigVO getConfig(Long id) {
+        ProductConfig config = getById(id);
+        if (config == null) {
+            throw new BusinessException("产品配置不存在");
+        }
+        return ProductConfigVO.from(config);
+    }
+
+    @Override
+    @Transactional
+    public ProductConfigVO createConfig(ProductConfigSaveRequest request) {
+        validateOfficialUrl(request.getOfficialUrl());
+        ProductConfig config = new ProductConfig();
+        LocalDateTime now = LocalDateTime.now();
+        config.setCreatedAt(now);
+        fillConfig(config, request, now);
+        save(config);
+        return ProductConfigVO.from(config);
+    }
+
+    @Override
+    @Transactional
+    public ProductConfigVO updateConfig(Long id, ProductConfigSaveRequest request) {
+        validateOfficialUrl(request.getOfficialUrl());
+        ProductConfig config = getById(id);
+        if (config == null) {
+            throw new BusinessException("产品配置不存在");
+        }
+        fillConfig(config, request, LocalDateTime.now());
+        updateById(config);
+        return ProductConfigVO.from(config);
+    }
+
+    @Override
+    @Transactional
+    public void deleteConfig(Long id) {
+        if (!removeById(id)) {
+            throw new BusinessException("产品配置不存在");
+        }
+    }
+
+    private ProductConfig getFirstConfig() {
+        return getOne(new LambdaQueryWrapper<ProductConfig>()
+                .orderByAsc(ProductConfig::getId)
+                .last("LIMIT 1"), false);
+    }
+
+    private void fillConfig(ProductConfig config, ProductConfigSaveRequest request, LocalDateTime updatedAt) {
         config.setProductName(request.getProductName());
         config.setProductIntro(request.getProductIntro());
         config.setOfficialUrl(request.getOfficialUrl());
@@ -43,16 +104,7 @@ public class ProductConfigServiceImpl extends ServiceImpl<ProductConfigMapper, P
         config.setAdvantages(request.getAdvantages());
         config.setBrandTone(request.getBrandTone());
         config.setBannedWords(request.getBannedWords());
-        config.setUpdatedAt(now);
-
-        saveOrUpdate(config);
-        return ProductConfigVO.from(config);
-    }
-
-    private ProductConfig getFirstConfig() {
-        return getOne(new LambdaQueryWrapper<ProductConfig>()
-                .orderByAsc(ProductConfig::getId)
-                .last("LIMIT 1"), false);
+        config.setUpdatedAt(updatedAt);
     }
 
     private void validateOfficialUrl(String officialUrl) {

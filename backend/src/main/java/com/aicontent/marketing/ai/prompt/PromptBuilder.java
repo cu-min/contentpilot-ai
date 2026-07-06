@@ -22,6 +22,9 @@ public class PromptBuilder {
     }
 
     public String buildUserPrompt(ProductConfigVO productConfig, AiArticleGenerateRequest request) {
+        if (productConfig == null || !StringUtils.hasText(productConfig.getProductName())) {
+            return buildTopicOnlyPrompt(request);
+        }
         return """
                 请基于以下产品配置和写作要求生成一篇原始文章。
 
@@ -64,6 +67,38 @@ public class PromptBuilder {
                 text(productConfig.getAdvantages()),
                 text(productConfig.getBrandTone()),
                 text(productConfig.getBannedWords()),
+                text(request.getTopic()),
+                text(request.getType()),
+                "ZH".equals(request.getLanguage()) ? "中文" : "英文",
+                text(request.getExtraRequirement())
+        );
+    }
+
+    private String buildTopicOnlyPrompt(AiArticleGenerateRequest request) {
+        return """
+                请基于以下写作要求生成一篇原始文章。
+
+                【文章要求】
+                文章主题：%s
+                文章类型：%s
+                语言：%s
+                额外要求：%s
+
+                【写作规则】
+                1. 当前没有选择关联产品，不要编造具体产品名称、官网链接、品牌能力或不存在的功能。
+                2. 请围绕文章主题本身展开，输出通用但具体、有信息量的内容。
+                3. 中文语言请输出中文，英文语言请输出英文。
+                4. Markdown 正文结构要清晰，包含标题、小标题和段落。
+                5. 根据文章类型采用合适写法：产品介绍可以写成通用方案介绍；教程强调步骤；行业科普强调知识解释；竞品对比强调客观比较；解决方案强调场景和路径；SEO文章强调搜索关键词覆盖。
+                6. 返回 JSON 格式如下：
+                {
+                  "title": "...",
+                  "summary": "...",
+                  "content": "...",
+                  "tags": ["标签1", "标签2"],
+                  "keywords": ["关键词1", "关键词2"]
+                }
+                """.formatted(
                 text(request.getTopic()),
                 text(request.getType()),
                 "ZH".equals(request.getLanguage()) ? "中文" : "英文",

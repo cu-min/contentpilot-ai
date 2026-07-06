@@ -4,7 +4,7 @@ import Login from '../pages/Login';
 import Dashboard from '../pages/Dashboard';
 import Article from '../pages/Article';
 import ArticleEditor from '../pages/ArticleEditor';
-import AiGenerate from '../pages/AiGenerate';
+import ArticleAiGenerate from '../pages/Article/AiGenerate';
 import Product from '../pages/Product';
 import Platform from '../pages/Platform';
 import Publish from '../pages/Publish';
@@ -33,7 +33,7 @@ export const router = createBrowserRouter([
       { path: 'articles', element: <Article /> },
       { path: 'articles/new', element: <ArticleEditor /> },
       { path: 'articles/:id', element: <ArticleEditor /> },
-      { path: 'ai-generate', element: <AiGenerate /> },
+      { path: 'ai-generate', element: <ArticleAiGenerate /> },
       { path: 'product', element: <Product /> },
       { path: 'platform', element: <Platform /> },
       { path: 'publish', element: <Publish /> },

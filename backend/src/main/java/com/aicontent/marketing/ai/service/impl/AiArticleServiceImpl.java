@@ -43,10 +43,9 @@ public class AiArticleServiceImpl implements AiArticleService {
 
     @Override
     public AiArticleGenerateVO generateArticle(AiArticleGenerateRequest request, Long currentUserId) {
-        ProductConfigVO productConfig = productConfigService.getCurrentConfig();
-        if (!StringUtils.hasText(productConfig.getProductName())) {
-            throw new BusinessException("请先完成产品配置");
-        }
+        ProductConfigVO productConfig = request.getProductConfigId() == null
+                ? null
+                : productConfigService.getConfig(request.getProductConfigId());
 
         String systemPrompt = promptBuilder.buildSystemPrompt();
         String userPrompt = promptBuilder.buildUserPrompt(productConfig, request);
