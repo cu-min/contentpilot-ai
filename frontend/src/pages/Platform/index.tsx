@@ -209,7 +209,7 @@ export default function Platform() {
             type="info"
             showIcon
             message="平台账号配置会在发布任务执行时使用。"
-            description="认证配置属于敏感信息，列表和详情均不会明文回显；编辑时留空表示保留原配置。JUEJIN + UNOFFICIAL_API 会调用真实掘金接口。"
+            description="认证配置属于敏感信息，列表和详情均不会明文回显；编辑时留空表示保留原配置。WECHAT_OFFICIAL + OFFICIAL_API 会创建公众号草稿，JUEJIN + UNOFFICIAL_API 会调用真实掘金接口。"
           />
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Typography.Text strong>平台账号列表</Typography.Text>
@@ -276,11 +276,11 @@ export default function Platform() {
           <Form.Item
             label="认证配置"
             name="authConfig"
-            extra={editing ? '编辑时留空表示保留原认证配置。掘金自动发布需要 cookie、defaultCategoryId、defaultTagIds，csrfToken 可选，敏感信息不要提交到代码仓库。' : '建议使用 JSON 字符串保存本地测试配置。掘金自动发布需要 cookie、defaultCategoryId、defaultTagIds，csrfToken 可选。'}
+            extra={editing ? '编辑时留空表示保留原认证配置。微信公众号需要 appId、appSecret、defaultThumbMediaId；掘金需要 cookie、defaultCategoryId、defaultTagIds。敏感信息不要提交到代码仓库。' : '建议使用 JSON 字符串保存本地测试配置。微信公众号需要 appId、appSecret、defaultThumbMediaId；掘金需要 cookie、defaultCategoryId、defaultTagIds。'}
           >
             <TextArea
               rows={5}
-              placeholder='例如：{"cookie":"本地填写","userAgent":"Mozilla/5.0 ...","csrfToken":"可选","aid":"2608","uuid":"","defaultCategoryId":"6809637776263217160","defaultTagIds":["6809640407484334093"],"draftOnly":false,"syncToOrg":false,"columnIds":[],"themeIds":[],"encryptedWordCount":1077883,"originWordCount":3}'
+              placeholder='微信公众号示例：{"appId":"wx1234567890abcdef","appSecret":"本地填写，不提交 Git","defaultThumbMediaId":"默认封面素材 media_id","author":"Tiklab","draftOnly":true,"needOpenComment":0,"onlyFansCanComment":0,"sourceUrl":""}'
             />
           </Form.Item>
           <Form.Item label="启用状态" name="enabled" valuePropName="checked" getValueFromEvent={(checked) => (checked ? 1 : 0)} getValueProps={(value) => ({ checked: value === 1 })}>

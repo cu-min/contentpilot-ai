@@ -79,4 +79,12 @@ public class PublishTaskController {
     ) {
         return Result.success(publishTaskService.executeTask(id, loginUser.getUserId()));
     }
+
+    @PostMapping("/{id}/refresh-status")
+    public Result<PublishTaskVO> refreshStatus(
+            @PathVariable Long id,
+            @AuthenticationPrincipal LoginUser loginUser
+    ) {
+        return Result.success(publishTaskService.refreshArticleStatus(id, loginUser.getUserId()));
+    }
 }

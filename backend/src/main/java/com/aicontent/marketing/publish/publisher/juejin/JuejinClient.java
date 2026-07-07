@@ -139,6 +139,41 @@ public class JuejinClient {
         }
     }
 
+    public JuejinArticleStatusResult queryArticleStatus(JuejinAuthConfig config, String articleId) {
+        try {
+            if (!StringUtils.hasText(articleId)) {
+                throw new BusinessException("掘金文章 ID 不能为空");
+            }
+            JsonNode info = queryArticleInfo(config, articleId);
+            if (!StringUtils.hasText(info.path("article_id").asText())) {
+                throw new BusinessException("掘金文章状态刷新失败：响应中缺少文章信息");
+            }
+            return new JuejinArticleStatusResult(info.path("article_id").asText(), resolveArticleStatus(info));
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException("掘金文章状态刷新失败：" + safeMessage(exception));
+        }
+    }
+
+    public JuejinArticleStatusResult queryArticleStatusByDraftId(JuejinAuthConfig config, String draftId) {
+        try {
+            if (!StringUtils.hasText(draftId)) {
+                throw new BusinessException("掘金草稿 ID 不能为空");
+            }
+            JsonNode info = queryArticleInfoByDraftId(config, draftId);
+            String articleId = info.path("article_id").asText();
+            if (!StringUtils.hasText(articleId) || "0".equals(articleId)) {
+                throw new BusinessException("掘金文章状态刷新失败：草稿未返回正式文章 ID");
+            }
+            return new JuejinArticleStatusResult(articleId, resolveArticleStatus(info));
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException("掘金文章状态刷新失败：" + safeMessage(exception));
+        }
+    }
+
     private JsonNode sendAndRead(
             JuejinAuthConfig config,
             String path,
@@ -161,6 +196,9 @@ public class JuejinClient {
 
     private HttpResponse<String> send(JuejinAuthConfig config, String path, String requestBody) throws Exception {
         String url = baseUrl + path + "?aid=" + encode(config.aid()) + "&uuid=" + encode(config.uuid());
+        if ("/article/detail".equals(path)) {
+            url += "&spider=0";
+        }
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(TIMEOUT)
@@ -197,6 +235,104 @@ public class JuejinClient {
         return StringUtils.hasText(articleId) ? articleId : "";
     }
 
+    private JsonNode queryArticleInfo(JuejinAuthConfig config, String articleId) throws Exception {
+        JsonNode root = sendAndRead(
+                config,
+                "/article/detail",
+                objectMapper.writeValueAsString(Map.of("article_id", articleId)),
+                "掘金文章状态刷新失败"
+        );
+        return readArticleInfo(root);
+    }
+
+    private JsonNode queryArticleInfoByDraftId(JuejinAuthConfig config, String draftId) throws Exception {
+        BusinessException firstException = null;
+        try {
+            JsonNode root = sendAndRead(
+                    config,
+                    "/article/detail",
+                    objectMapper.writeValueAsString(Map.of("draft_id", draftId)),
+                    "掘金文章状态刷新失败"
+            );
+            JsonNode info = readArticleInfo(root);
+            if (draftMatches(info, draftId)) {
+                return info;
+            }
+        } catch (BusinessException exception) {
+            firstException = exception;
+        }
+
+        try {
+            JsonNode root = sendAndRead(
+                    config,
+                    "/article_draft/detail",
+                    objectMapper.writeValueAsString(Map.of("draft_id", draftId)),
+                    "掘金文章状态刷新失败"
+            );
+            JsonNode info = readArticleInfo(root);
+            if (StringUtils.hasText(info.path("article_id").asText())) {
+                return info;
+            }
+        } catch (BusinessException exception) {
+            if (firstException != null) {
+                throw firstException;
+            }
+            throw exception;
+        }
+
+        throw new BusinessException("掘金文章状态刷新失败：未能通过草稿 ID 找到正式文章");
+    }
+
+    private JsonNode readArticleInfo(JsonNode root) {
+        JsonNode info = root.path("data").path("article_info");
+        if (info.isMissingNode() || info.isNull()) {
+            info = root.path("data");
+        }
+        return info;
+    }
+
+    private boolean draftMatches(JsonNode info, String draftId) {
+        return draftId.equals(info.path("draft_id").asText());
+    }
+
+    private String resolveArticleStatus(JsonNode info) {
+        String statusText = (
+                info.path("status").asText("") + " " +
+                        info.path("audit_status").asText("") + " " +
+                        info.path("review_status").asText("") + " " +
+                        info.path("article_status").asText("") + " " +
+                        info.path("status_text").asText("") + " " +
+                        info.path("audit_msg").asText("")
+        ).toLowerCase();
+        if (statusText.contains("reject") || statusText.contains("fail")
+                || statusText.contains("未通过") || statusText.contains("驳回")) {
+            return "REJECTED";
+        }
+        if (statusText.contains("publish") || statusText.contains("published")
+                || statusText.contains("已发布") || statusText.contains("通过")) {
+            return "PUBLISHED";
+        }
+        if (readLong(info.path("rtime").asText("")) > 0) {
+            return "PUBLISHED";
+        }
+        if (statusText.contains("audit") || statusText.contains("review")
+                || statusText.contains("审核")) {
+            return "REVIEWING";
+        }
+        return "REVIEWING";
+    }
+
+    private long readLong(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return 0;
+        }
+        try {
+            return Long.parseLong(raw);
+        } catch (NumberFormatException exception) {
+            return 0;
+        }
+    }
+
     public record JuejinDraftCreateResult(String draftId) {
     }
 
@@ -211,5 +347,8 @@ public class JuejinClient {
     }
 
     public record JuejinPublishResult(String articleId) {
+    }
+
+    public record JuejinArticleStatusResult(String articleId, String articleStatus) {
     }
 }

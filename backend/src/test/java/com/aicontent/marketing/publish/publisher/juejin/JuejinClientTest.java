@@ -88,6 +88,42 @@ class JuejinClientTest {
         assertEquals("掘金正式发布失败：category invalid", exception.getMessage());
     }
 
+    @Test
+    void queryArticleStatusTreatsPositiveRtimeAsPublished() {
+        server.createContext("/article/detail", exchange -> respond(exchange, 200, """
+                {"err_no":0,"err_msg":"success","data":{"article_info":{"article_id":"7659027978949525547","rtime":"1783323631"}}}
+                """));
+
+        JuejinClient.JuejinArticleStatusResult result = client.queryArticleStatus(config, "7659027978949525547");
+
+        assertEquals("7659027978949525547", result.articleId());
+        assertEquals("PUBLISHED", result.articleStatus());
+    }
+
+    @Test
+    void queryArticleStatusTreatsMissingRtimeAsReviewing() {
+        server.createContext("/article/detail", exchange -> respond(exchange, 200, """
+                {"err_no":0,"err_msg":"success","data":{"article_info":{"article_id":"7659027978949525547","rtime":"-62135596800"}}}
+                """));
+
+        JuejinClient.JuejinArticleStatusResult result = client.queryArticleStatus(config, "7659027978949525547");
+
+        assertEquals("7659027978949525547", result.articleId());
+        assertEquals("REVIEWING", result.articleStatus());
+    }
+
+    @Test
+    void queryArticleStatusByDraftIdParsesArticleId() {
+        server.createContext("/article/detail", exchange -> respond(exchange, 200, """
+                {"err_no":0,"err_msg":"success","data":{"article_info":{"article_id":"7659027978949525547","draft_id":"7659214017063878699","rtime":"1783323631"}}}
+                """));
+
+        JuejinClient.JuejinArticleStatusResult result = client.queryArticleStatusByDraftId(config, "7659214017063878699");
+
+        assertEquals("7659027978949525547", result.articleId());
+        assertEquals("PUBLISHED", result.articleStatus());
+    }
+
     private void respond(HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json");

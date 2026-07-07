@@ -40,6 +40,8 @@ public class PublishTask {
 
     private String draftUrl;
 
+    private String articleStatus;
+
     private String errorMessage;
 
     private Long createdBy;

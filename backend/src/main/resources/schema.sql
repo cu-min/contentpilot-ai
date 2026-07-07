@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS publish_task (
     external_draft_id VARCHAR(100),
     external_article_id VARCHAR(100),
     draft_url VARCHAR(500),
+    article_status VARCHAR(50),
     error_message TEXT,
     created_by BIGINT,
     updated_by BIGINT,

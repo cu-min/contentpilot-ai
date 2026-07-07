@@ -22,4 +22,6 @@ public interface PublishTaskService extends IService<PublishTask> {
     void cancelTask(Long id, Long currentUserId);
 
     PublishTaskVO executeTask(Long id, Long currentUserId);
+
+    PublishTaskVO refreshArticleStatus(Long id, Long currentUserId);
 }

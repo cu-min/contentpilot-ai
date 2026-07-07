@@ -16,6 +16,14 @@ export type PublishTaskStatus =
 
 export type PublishType = 'IMMEDIATE' | 'SCHEDULED';
 
+export type PublishArticleStatus =
+  | 'SUBMITTED'
+  | 'REVIEWING'
+  | 'PUBLISHED'
+  | 'REJECTED'
+  | 'FAILED'
+  | 'CANCELLED';
+
 export interface PublishTask {
   id: number;
   articleId: number;
@@ -33,6 +41,7 @@ export interface PublishTask {
   externalDraftId?: string;
   externalArticleId?: string;
   draftUrl?: string;
+  articleStatus?: PublishArticleStatus;
   errorMessage?: string;
   createdBy?: number;
   updatedBy?: number;

@@ -14,10 +14,13 @@ import com.aicontent.marketing.publish.publisher.PlatformPublisher;
 import com.aicontent.marketing.publish.publisher.PublishContext;
 import com.aicontent.marketing.publish.publisher.PublishResult;
 import com.aicontent.marketing.publish.publisher.PublisherRegistry;
+import com.aicontent.marketing.publish.publisher.juejin.JuejinAuthConfig;
+import com.aicontent.marketing.publish.publisher.juejin.JuejinClient;
 import com.aicontent.marketing.publish.vo.PublishTaskVO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -35,6 +38,11 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     private static final String STATUS_RUNNING = "RUNNING";
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_FAILED = "FAILED";
+    private static final String ARTICLE_STATUS_REVIEWING = "REVIEWING";
+    private static final String ARTICLE_STATUS_PUBLISHED = "PUBLISHED";
+    private static final String ARTICLE_STATUS_SUBMITTED = "SUBMITTED";
+    private static final String ARTICLE_STATUS_FAILED = "FAILED";
+    private static final String ARTICLE_STATUS_CANCELLED = "CANCELLED";
 
     private static final Set<String> PLATFORMS = Set.of("WECHAT_OFFICIAL", "ZHIHU", "CSDN", "JUEJIN");
     private static final Set<String> PUBLISH_TYPES = Set.of("IMMEDIATE", "SCHEDULED");
@@ -55,15 +63,21 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     private final ArticlePlatformContentMapper platformContentMapper;
     private final PlatformAccountMapper platformAccountMapper;
     private final PublisherRegistry publisherRegistry;
+    private final JuejinClient juejinClient;
+    private final ObjectMapper objectMapper;
 
     public PublishTaskServiceImpl(
             ArticlePlatformContentMapper platformContentMapper,
             PlatformAccountMapper platformAccountMapper,
-            PublisherRegistry publisherRegistry
+            PublisherRegistry publisherRegistry,
+            JuejinClient juejinClient,
+            ObjectMapper objectMapper
     ) {
         this.platformContentMapper = platformContentMapper;
         this.platformAccountMapper = platformAccountMapper;
         this.publisherRegistry = publisherRegistry;
+        this.juejinClient = juejinClient;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -143,6 +157,7 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
             throw new BusinessException("只有草稿或待执行状态的发布任务可以取消");
         }
         task.setStatus(STATUS_CANCELLED);
+        task.setArticleStatus(ARTICLE_STATUS_CANCELLED);
         task.setUpdatedBy(currentUserId);
         task.setUpdatedAt(LocalDateTime.now());
         updateById(task);
@@ -151,8 +166,8 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     @Override
     public PublishTaskVO executeTask(Long id, Long currentUserId) {
         PublishTask task = getRequiredTask(id);
-        if (!STATUS_PENDING.equals(task.getStatus()) && !STATUS_FAILED.equals(task.getStatus())) {
-            throw new BusinessException("只有待执行或执行失败的发布任务可以执行");
+        if (!STATUS_PENDING.equals(task.getStatus())) {
+            throw new BusinessException("只有待执行状态的发布任务可以执行");
         }
 
         ArticlePlatformContent platformContent = getRequiredPlatformContent(task.getPlatformContentId());
@@ -163,6 +178,7 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         task.setStatus(STATUS_RUNNING);
         task.setPublishUrl(null);
         task.setExternalArticleId(null);
+        task.setArticleStatus(null);
         task.setErrorMessage(null);
         task.setUpdatedBy(currentUserId);
         task.setUpdatedAt(now);
@@ -175,21 +191,73 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
             if (result.success()) {
                 task.setStatus(STATUS_SUCCESS);
                 task.setPublishUrl(result.publishUrl());
+                task.setArticleStatus(resolveSuccessArticleStatus(result));
                 task.setErrorMessage(null);
             } else {
                 task.setStatus(STATUS_FAILED);
                 task.setPublishUrl(null);
+                task.setArticleStatus(ARTICLE_STATUS_FAILED);
                 task.setErrorMessage(StringUtils.hasText(result.errorMessage()) ? result.errorMessage() : "发布执行失败");
             }
         } catch (Exception exception) {
             task.setStatus(STATUS_FAILED);
             task.setPublishUrl(null);
+            task.setArticleStatus(ARTICLE_STATUS_FAILED);
             task.setErrorMessage("发布执行失败：" + exception.getMessage());
         }
         task.setUpdatedBy(currentUserId);
         task.setUpdatedAt(LocalDateTime.now());
         updateById(task);
         return toVO(task);
+    }
+
+    @Override
+    @Transactional
+    public PublishTaskVO refreshArticleStatus(Long id, Long currentUserId) {
+        PublishTask task = getRequiredTask(id);
+        if (!"JUEJIN".equals(task.getPlatform()) || !STATUS_SUCCESS.equals(task.getStatus())) {
+            return toVO(task);
+        }
+        String articleId = resolveArticleId(task);
+        if (!StringUtils.hasText(articleId)) {
+            return refreshArticleStatusByDraftId(task, currentUserId);
+        }
+
+        PlatformAccount account = getRequiredAccount(task.getAccountId());
+        JuejinAuthConfig config = JuejinAuthConfig.parse(account.getAuthConfig(), objectMapper);
+        JuejinClient.JuejinArticleStatusResult result = juejinClient.queryArticleStatus(config, articleId);
+        fillRefreshedArticleStatus(task, result);
+        task.setUpdatedBy(currentUserId);
+        task.setUpdatedAt(LocalDateTime.now());
+        updateById(task);
+        return toVO(task);
+    }
+
+    private PublishTaskVO refreshArticleStatusByDraftId(PublishTask task, Long currentUserId) {
+        String draftId = resolveDraftId(task);
+        if (!StringUtils.hasText(draftId)) {
+            task.setArticleStatus(ARTICLE_STATUS_SUBMITTED);
+            task.setUpdatedBy(currentUserId);
+            task.setUpdatedAt(LocalDateTime.now());
+            updateById(task);
+            return toVO(task);
+        }
+        PlatformAccount account = getRequiredAccount(task.getAccountId());
+        JuejinAuthConfig config = JuejinAuthConfig.parse(account.getAuthConfig(), objectMapper);
+        JuejinClient.JuejinArticleStatusResult result = juejinClient.queryArticleStatusByDraftId(config, draftId);
+        fillRefreshedArticleStatus(task, result);
+        task.setUpdatedBy(currentUserId);
+        task.setUpdatedAt(LocalDateTime.now());
+        updateById(task);
+        return toVO(task);
+    }
+
+    private void fillRefreshedArticleStatus(PublishTask task, JuejinClient.JuejinArticleStatusResult result) {
+        task.setArticleStatus(result.articleStatus());
+        if (StringUtils.hasText(result.articleId())) {
+            task.setExternalArticleId(result.articleId());
+            task.setPublishUrl(articleUrl(result.articleId()));
+        }
     }
 
     private void fillExternalResult(PublishTask task, PublishResult result) {
@@ -202,6 +270,16 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         if (StringUtils.hasText(result.articleId())) {
             task.setExternalArticleId(result.articleId());
         }
+    }
+
+    private String resolveSuccessArticleStatus(PublishResult result) {
+        if (StringUtils.hasText(result.publishUrl()) && result.publishUrl().startsWith("wechat-draft:")) {
+            return ARTICLE_STATUS_SUBMITTED;
+        }
+        if (StringUtils.hasText(result.articleId()) || StringUtils.hasText(result.publishUrl())) {
+            return ARTICLE_STATUS_REVIEWING;
+        }
+        return ARTICLE_STATUS_SUBMITTED;
     }
 
     private void fillTask(
@@ -298,6 +376,52 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
             throw new BusinessException(ResultCode.NOT_FOUND, "发布任务不存在");
         }
         return task;
+    }
+
+    private String resolveArticleId(PublishTask task) {
+        if (StringUtils.hasText(task.getExternalArticleId())) {
+            return task.getExternalArticleId();
+        }
+        if (!StringUtils.hasText(task.getPublishUrl())) {
+            return "";
+        }
+        String marker = "/post/";
+        int index = task.getPublishUrl().indexOf(marker);
+        if (index < 0) {
+            return "";
+        }
+        String articleId = task.getPublishUrl().substring(index + marker.length());
+        int queryIndex = articleId.indexOf('?');
+        return queryIndex >= 0 ? articleId.substring(0, queryIndex) : articleId;
+    }
+
+    private String resolveDraftId(PublishTask task) {
+        if (StringUtils.hasText(task.getExternalDraftId())) {
+            return task.getExternalDraftId();
+        }
+        String draftId = resolveDraftIdFromUrl(task.getDraftUrl());
+        if (StringUtils.hasText(draftId)) {
+            return draftId;
+        }
+        return resolveDraftIdFromUrl(task.getPublishUrl());
+    }
+
+    private String resolveDraftIdFromUrl(String url) {
+        if (!StringUtils.hasText(url)) {
+            return "";
+        }
+        String marker = "/editor/drafts/";
+        int index = url.indexOf(marker);
+        if (index < 0) {
+            return "";
+        }
+        String draftId = url.substring(index + marker.length());
+        int queryIndex = draftId.indexOf('?');
+        return queryIndex >= 0 ? draftId.substring(0, queryIndex) : draftId;
+    }
+
+    private String articleUrl(String articleId) {
+        return "https://juejin.cn/post/" + articleId;
     }
 
     private PublishTaskVO toVO(PublishTask task) {

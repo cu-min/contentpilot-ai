@@ -69,7 +69,7 @@ public class JuejinPublisher implements PlatformPublisher {
             if (StringUtils.hasText(articleId)) {
                 return PublishResult.success(articleUrl(articleId), draftId, draftUrl, articleId, "掘金文章发布成功");
             }
-            return PublishResult.success(draftUrl, draftId, draftUrl, null, "掘金文章发布成功，但响应中未返回正式文章 ID");
+            return PublishResult.success(null, draftId, draftUrl, null, "掘金文章发布成功，但响应中未返回正式文章 ID");
         } catch (BusinessException exception) {
             return PublishResult.failed(exception.getMessage(), draftId, draftUrl, null);
         } catch (Exception exception) {

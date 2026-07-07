@@ -7,6 +7,7 @@ import com.aicontent.marketing.platform.dto.PlatformAccountSaveRequest;
 import com.aicontent.marketing.platform.entity.PlatformAccount;
 import com.aicontent.marketing.platform.mapper.PlatformAccountMapper;
 import com.aicontent.marketing.platform.vo.PlatformAccountVO;
+import com.aicontent.marketing.publish.publisher.wechat.WechatAuthConfig;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -167,6 +168,9 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
         JsonNode root = parseAuthConfig(request.getAuthConfig());
         if ("JUEJIN".equals(request.getPlatform()) && "UNOFFICIAL_API".equals(request.getDefaultPublishMode())) {
             validateJuejinAuthConfig(root);
+        }
+        if ("WECHAT_OFFICIAL".equals(request.getPlatform()) && "OFFICIAL_API".equals(request.getDefaultPublishMode())) {
+            WechatAuthConfig.parse(request.getAuthConfig(), objectMapper);
         }
     }
 

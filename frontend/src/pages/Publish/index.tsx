@@ -27,6 +27,7 @@ import {
   executePublishTask,
   getPublishTaskDetail,
   getPublishTasks,
+  refreshPublishTaskStatus,
   submitPublishTask,
   updatePublishTask,
 } from '../../api/publishTask';
@@ -67,6 +68,7 @@ export default function Publish() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [executingTaskId, setExecutingTaskId] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<PublishTask | null>(null);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
@@ -100,8 +102,10 @@ export default function Publish() {
         pageSize: result.data.size,
         total: result.data.total,
       });
+      return true;
     } catch (error) {
       message.error(error instanceof Error ? error.message : '发布任务加载失败');
+      return false;
     } finally {
       setLoading(false);
     }
@@ -275,7 +279,7 @@ export default function Publish() {
     try {
       const result = await executePublishTask(record.id);
       if (result.data.status === 'SUCCESS') {
-        message.success('自动发布成功');
+        message.success(record.platform === 'WECHAT_OFFICIAL' ? '公众号草稿创建成功' : '自动发布成功');
       } else {
         message.error(`自动发布失败：${result.data.errorMessage || getPublishTaskStatusLabel(result.data.status) || '发布失败'}`);
       }
@@ -284,6 +288,32 @@ export default function Publish() {
       message.error(`自动发布失败：${getErrorText(error, '发布失败')}`);
     } finally {
       setExecutingTaskId(null);
+    }
+  };
+
+  const handleRefreshStatus = async () => {
+    setRefreshing(true);
+    try {
+      const refreshableTasks = tasks.filter((task) => (
+        task.platform === 'JUEJIN'
+        && task.status === 'SUCCESS'
+        && Boolean(task.externalArticleId || task.publishUrl || task.externalDraftId || task.draftUrl)
+      ));
+      if (refreshableTasks.length > 0) {
+        const results = await Promise.allSettled(
+          refreshableTasks.map((task) => refreshPublishTaskStatus(task.id)),
+        );
+        const failedCount = results.filter((result) => result.status === 'rejected').length;
+        if (failedCount > 0) {
+          message.warning(`${failedCount} 条掘金文章状态刷新失败，请稍后重试`);
+        }
+      }
+      const success = await loadTasks(pagination.current, pagination.pageSize);
+      if (success) {
+        message.success('状态已刷新');
+      }
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -308,10 +338,37 @@ export default function Publish() {
     return 'default';
   };
 
+  const articleStatus = (record: PublishTask) => {
+    if (record.status === 'DRAFT' || record.status === 'PENDING') return null;
+    if (record.status === 'RUNNING') return { label: '发布中', color: 'blue' };
+    if (record.articleStatus === 'PUBLISHED') return { label: '已发布', color: 'success' };
+    if (record.articleStatus === 'REJECTED') return { label: '未通过', color: 'error' };
+    if (record.articleStatus === 'FAILED') return { label: '发布失败', color: 'error' };
+    if (record.articleStatus === 'CANCELLED') return { label: '已取消', color: 'default' };
+    if (record.articleStatus === 'SUBMITTED') return { label: '已提交，待取链', color: 'warning' };
+    if (record.articleStatus === 'REVIEWING') {
+      return { label: '审核中', color: 'warning' };
+    }
+    if (record.status === 'SUCCESS' && (isOfficialArticleUrl(record.publishUrl) || record.externalArticleId)) {
+      return { label: '审核中', color: 'warning' };
+    }
+    if (record.status === 'SUCCESS') return { label: '已提交，待取链', color: 'warning' };
+    if (record.status === 'CONTENT_REJECTED') return { label: '未通过', color: 'error' };
+    if (record.status === 'NEED_LOGIN') return { label: '需登录', color: 'error' };
+    if (record.status === 'NEED_CAPTCHA') return { label: '需验证码', color: 'error' };
+    if (record.status === 'CANCELLED') return { label: '已取消', color: 'default' };
+    if (isFailureStatus(record.status)) return { label: '发布失败', color: 'error' };
+    return { label: getPublishTaskStatusLabel(record.status), color: statusColor(record.status) };
+  };
+
+  const isOfficialArticleUrl = (url?: string) => Boolean(url && url.includes('/post/'));
+
+  const isWechatDraftUrl = (url?: string) => Boolean(url?.startsWith('wechat-draft:'));
+
   const handleViewResult = (record: PublishTask) => {
     const url = record.publishUrl || record.draftUrl;
-    if (!url) {
-      message.info('暂无结果链接');
+    if (!url || isWechatDraftUrl(url)) {
+      message.info(url ? `微信公众号草稿 media_id：${url.replace('wechat-draft:', '')}` : '暂无结果链接');
       return;
     }
     window.open(url, '_blank', 'noreferrer');
@@ -359,18 +416,7 @@ export default function Publish() {
     }
 
     if (isFailureStatus(record.status)) {
-      return (
-        <Space size={8} wrap>
-          <Button size="small" danger onClick={() => handleViewFailure(record)}>查看失败原因</Button>
-          <Popconfirm title="确认重新自动发布该文章？" okText="重新发布" cancelText="取消" onConfirm={() => handleExecute(record)}>
-            <Button size="small" loading={executingTaskId === record.id}>重新发布</Button>
-          </Popconfirm>
-        </Space>
-      );
-    }
-
-    if (record.status === 'CANCELLED') {
-      return <Typography.Text type="secondary">不可操作</Typography.Text>;
+      return <Button size="small" danger onClick={() => handleViewFailure(record)}>查看失败原因</Button>;
     }
 
     return <Typography.Text type="secondary">不可操作</Typography.Text>;
@@ -398,9 +444,9 @@ export default function Publish() {
       ellipsis: true,
     },
     {
-      title: '状态',
+      title: '任务状态',
       dataIndex: 'status',
-      width: 100,
+      width: 110,
       render: (status: PublishTaskStatus) => (
         <Tag color={statusColor(status)}>{getPublishTaskStatusLabel(status)}</Tag>
       ),
@@ -432,32 +478,21 @@ export default function Publish() {
       width: 180,
       responsive: ['lg'],
       render: (_, record) => {
-        if (record.status === 'SUCCESS' && record.publishUrl) {
+        if (record.status === 'SUCCESS' && isOfficialArticleUrl(record.publishUrl)) {
           return (
             <Typography.Link href={record.publishUrl} target="_blank" rel="noreferrer">
               查看文章
             </Typography.Link>
           );
         }
-        if (record.status === 'SUCCESS' && record.draftUrl) {
-          return (
-            <Typography.Link href={record.draftUrl} target="_blank" rel="noreferrer">
-              查看草稿
-            </Typography.Link>
-          );
+        if (record.status === 'SUCCESS' && isWechatDraftUrl(record.publishUrl)) {
+          return <Typography.Text>草稿创建成功</Typography.Text>;
         }
         if (isFailureStatus(record.status)) {
           return (
-            <Space size={6} wrap>
-              {record.draftUrl ? (
-                <Typography.Link href={record.draftUrl} target="_blank" rel="noreferrer">
-                  草稿
-                </Typography.Link>
-              ) : null}
-              <Typography.Text type="danger" ellipsis={{ tooltip: record.errorMessage }}>
-                {record.errorMessage || getPublishTaskStatusLabel(record.status) || '执行失败'}
-              </Typography.Text>
-            </Space>
+            <Typography.Text type="danger" ellipsis={{ tooltip: record.errorMessage }}>
+              {record.errorMessage || getPublishTaskStatusLabel(record.status) || '执行失败'}
+            </Typography.Text>
           );
         }
         return '-';
@@ -469,12 +504,21 @@ export default function Publish() {
       width: 210,
       render: (_, record) => renderTaskActions(record),
     },
+    {
+      title: '文章状态',
+      key: 'articleStatus',
+      width: 130,
+      render: (_, record) => {
+        const status = articleStatus(record);
+        return status ? <Tag color={status.color}>{status.label}</Tag> : '-';
+      },
+    },
   ];
 
   return (
     <PageContainer
       title="发布任务"
-      description="创建平台发布稿的发布任务，提交后可自动完成掘金新草稿创建、内容更新与文章发布。"
+      description="创建平台发布稿的发布任务，提交后可手动执行自动发布或草稿创建。"
     >
       <SectionCard>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -482,7 +526,7 @@ export default function Publish() {
             type="info"
             showIcon
             message="JUEJIN + UNOFFICIAL_API 会访问真实掘金接口。"
-            description="掘金账号需要配置 cookie、defaultCategoryId、defaultTagIds；发布失败后可重新发布，并复用已创建的发布记录。其他平台 Publisher 后续逐步接入。"
+            description="WECHAT_OFFICIAL + OFFICIAL_API 会创建公众号草稿；掘金账号需要配置 cookie、defaultCategoryId、defaultTagIds。发布后可点击刷新状态同步掘金文章状态。"
           />
           <Form form={filterForm} layout="inline" onFinish={() => loadTasks(1, pagination.pageSize)}>
             <Form.Item name="platform">
@@ -521,7 +565,10 @@ export default function Publish() {
           </Form>
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Typography.Text strong>发布任务列表</Typography.Text>
-            <Button type="primary" onClick={() => openCreate()}>创建发布任务</Button>
+            <Space>
+              <Button loading={refreshing} onClick={handleRefreshStatus}>刷新状态</Button>
+              <Button type="primary" onClick={() => openCreate()}>创建发布任务</Button>
+            </Space>
           </Space>
           <Table
             rowKey="id"
