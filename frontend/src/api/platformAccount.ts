@@ -24,3 +24,12 @@ export function updatePlatformAccount(id: number, data: PlatformAccountPayload) 
 export function updatePlatformAccountStatus(id: number, enabled: number) {
   return request.put<unknown, ApiResult<null>>(`/platform-accounts/${id}/status`, { enabled });
 }
+
+export function uploadWechatDefaultCover(id: number, file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request.post<unknown, ApiResult<PlatformAccount>>(
+    `/platform-accounts/${id}/wechat/default-cover`,
+    formData,
+  );
+}

@@ -17,6 +17,14 @@ public record WechatAuthConfig(
 ) {
 
     public static WechatAuthConfig parse(String rawConfig, ObjectMapper objectMapper) {
+        return parse(rawConfig, objectMapper, true);
+    }
+
+    public static WechatAuthConfig parseForDefaultCoverUpload(String rawConfig, ObjectMapper objectMapper) {
+        return parse(rawConfig, objectMapper, false);
+    }
+
+    private static WechatAuthConfig parse(String rawConfig, ObjectMapper objectMapper, boolean requireDefaultThumbMediaId) {
         if (!StringUtils.hasText(rawConfig)) {
             throw new BusinessException("微信公众号认证配置未配置");
         }
@@ -32,7 +40,7 @@ public record WechatAuthConfig(
                     integer(root, "onlyFansCanComment", 0),
                     text(root, "sourceUrl", "")
             );
-            config.validate();
+            config.validate(requireDefaultThumbMediaId);
             return config;
         } catch (BusinessException exception) {
             throw exception;
@@ -41,14 +49,14 @@ public record WechatAuthConfig(
         }
     }
 
-    private void validate() {
+    private void validate(boolean requireDefaultThumbMediaId) {
         if (!StringUtils.hasText(appId)) {
             throw new BusinessException("微信公众号 AppID 未配置");
         }
         if (!StringUtils.hasText(appSecret)) {
             throw new BusinessException("微信公众号 AppSecret 未配置");
         }
-        if (!StringUtils.hasText(defaultThumbMediaId)) {
+        if (requireDefaultThumbMediaId && !StringUtils.hasText(defaultThumbMediaId)) {
             throw new BusinessException("微信公众号默认封面素材 media_id 未配置");
         }
     }

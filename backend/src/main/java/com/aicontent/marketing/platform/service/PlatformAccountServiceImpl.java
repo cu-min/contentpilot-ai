@@ -7,17 +7,23 @@ import com.aicontent.marketing.platform.dto.PlatformAccountSaveRequest;
 import com.aicontent.marketing.platform.entity.PlatformAccount;
 import com.aicontent.marketing.platform.mapper.PlatformAccountMapper;
 import com.aicontent.marketing.platform.vo.PlatformAccountVO;
+import com.aicontent.marketing.publish.publisher.wechat.WechatAccessTokenCache;
 import com.aicontent.marketing.publish.publisher.wechat.WechatAuthConfig;
+import com.aicontent.marketing.publish.publisher.wechat.WechatClient;
+import com.aicontent.marketing.publish.publisher.wechat.WechatMaterialUploadResponse;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
 import java.util.List;
 import java.util.Set;
 
@@ -28,12 +34,22 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
     private static final Set<String> PLATFORMS = Set.of("WECHAT_OFFICIAL", "ZHIHU", "CSDN", "JUEJIN");
     private static final Set<String> AUTH_TYPES = Set.of("APP_SECRET", "COOKIE", "BROWSER_PROFILE", "API_KEY", "MANUAL");
     private static final Set<String> PUBLISH_MODES = Set.of("OFFICIAL_API", "UNOFFICIAL_API", "BROWSER_AUTOMATION", "MANUAL_CONFIRM");
+    private static final Set<String> DEFAULT_COVER_EXTENSIONS = Set.of("jpg", "jpeg", "png", "gif", "bmp");
+    private static final long DEFAULT_COVER_MAX_SIZE = 2 * 1024 * 1024;
     private static final String AUTH_CONFIG_JSON_ERROR = "认证配置必须是合法 JSON，请检查双引号、逗号和字段格式";
 
     private final ObjectMapper objectMapper;
+    private final WechatAccessTokenCache wechatAccessTokenCache;
+    private final WechatClient wechatClient;
 
-    public PlatformAccountServiceImpl(ObjectMapper objectMapper) {
+    public PlatformAccountServiceImpl(
+            ObjectMapper objectMapper,
+            WechatAccessTokenCache wechatAccessTokenCache,
+            WechatClient wechatClient
+    ) {
         this.objectMapper = objectMapper;
+        this.wechatAccessTokenCache = wechatAccessTokenCache;
+        this.wechatClient = wechatClient;
     }
 
     @Override
@@ -96,6 +112,26 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
         account.setUpdatedAt(LocalDateTime.now());
         updateById(account);
         disableOtherAccountsIfNeeded(account);
+    }
+
+    @Override
+    @Transactional
+    public PlatformAccountVO uploadWechatDefaultCover(Long id, MultipartFile file, Long currentUserId) {
+        PlatformAccount account = getRequiredAccount(id);
+        if (!"WECHAT_OFFICIAL".equals(account.getPlatform())) {
+            throw new BusinessException("仅微信公众号账号支持上传默认封面");
+        }
+        validateDefaultCoverFile(file);
+
+        WechatAuthConfig config = WechatAuthConfig.parseForDefaultCoverUpload(account.getAuthConfig(), objectMapper);
+        String accessToken = wechatAccessTokenCache.getToken(config.appId(), config.appSecret(), wechatClient);
+        WechatMaterialUploadResponse response = wechatClient.uploadPermanentImageMaterial(accessToken, file);
+
+        account.setAuthConfig(updateDefaultThumbMediaId(account.getAuthConfig(), response.mediaId()));
+        account.setUpdatedBy(currentUserId);
+        account.setUpdatedAt(LocalDateTime.now());
+        updateById(account);
+        return PlatformAccountVO.from(account);
     }
 
     private void fillAccount(
@@ -197,5 +233,45 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
     private boolean hasTextField(JsonNode root, String fieldName) {
         JsonNode value = root.path(fieldName);
         return value.isTextual() && StringUtils.hasText(value.asText());
+    }
+
+    private void validateDefaultCoverFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("请选择要上传的封面图片");
+        }
+        if (file.getSize() > DEFAULT_COVER_MAX_SIZE) {
+            throw new BusinessException("封面图片大小不能超过 2MB");
+        }
+        String extension = getFileExtension(file.getOriginalFilename());
+        if (!DEFAULT_COVER_EXTENSIONS.contains(extension)) {
+            throw new BusinessException("仅支持 jpg、jpeg、png、gif、bmp 格式图片");
+        }
+    }
+
+    private String getFileExtension(String filename) {
+        if (!StringUtils.hasText(filename)) {
+            return "";
+        }
+        int dotIndex = filename.lastIndexOf('.');
+        if (dotIndex < 0 || dotIndex == filename.length() - 1) {
+            return "";
+        }
+        return filename.substring(dotIndex + 1).toLowerCase(Locale.ROOT);
+    }
+
+    private String updateDefaultThumbMediaId(String rawConfig, String mediaId) {
+        try {
+            JsonNode root = objectMapper.readTree(rawConfig);
+            if (!root.isObject()) {
+                throw new BusinessException("微信公众号认证配置格式错误");
+            }
+            ObjectNode objectNode = (ObjectNode) root;
+            objectNode.put("defaultThumbMediaId", mediaId);
+            return objectMapper.writeValueAsString(objectNode);
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException("微信公众号认证配置格式错误");
+        }
     }
 }

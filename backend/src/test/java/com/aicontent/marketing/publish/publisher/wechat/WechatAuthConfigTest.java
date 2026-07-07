@@ -59,6 +59,20 @@ class WechatAuthConfigTest {
     }
 
     @Test
+    void parseForDefaultCoverUploadAllowsMissingThumbMediaId() {
+        WechatAuthConfig config = WechatAuthConfig.parseForDefaultCoverUpload("""
+                {
+                  "appId": "wx123",
+                  "appSecret": "secret"
+                }
+                """, objectMapper);
+
+        assertEquals("wx123", config.appId());
+        assertEquals("secret", config.appSecret());
+        assertEquals(null, config.defaultThumbMediaId());
+    }
+
+    @Test
     void parseReportsInvalidJson() {
         BusinessException exception = assertThrows(BusinessException.class, () -> WechatAuthConfig.parse("{", objectMapper));
 

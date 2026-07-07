@@ -11,6 +11,7 @@ import {
   Table,
   Tag,
   Typography,
+  Upload,
   message,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
@@ -21,6 +22,7 @@ import {
   getPlatformAccounts,
   updatePlatformAccount,
   updatePlatformAccountStatus,
+  uploadWechatDefaultCover,
 } from '../../api/platformAccount';
 import PageContainer from '../../components/PageContainer';
 import SectionCard from '../../components/SectionCard';
@@ -38,12 +40,15 @@ import {
 import { formatFailure } from '../../utils/feedback';
 
 const { TextArea } = Input;
+const coverExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp'];
+const coverMaxSize = 2 * 1024 * 1024;
 
 export default function Platform() {
   const [form] = Form.useForm<PlatformAccountPayload>();
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadingCoverId, setUploadingCoverId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<PlatformAccount | null>(null);
 
@@ -131,6 +136,28 @@ export default function Platform() {
     }
   };
 
+  const handleUploadDefaultCover = async (record: PlatformAccount, file: File) => {
+    const extension = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : '';
+    if (!extension || !coverExtensions.includes(extension)) {
+      message.error('仅支持 jpg、jpeg、png、gif、bmp 格式图片');
+      return;
+    }
+    if (file.size > coverMaxSize) {
+      message.error('封面图片大小不能超过 2MB');
+      return;
+    }
+    setUploadingCoverId(record.id);
+    try {
+      await uploadWechatDefaultCover(record.id, file);
+      message.success('默认封面上传成功');
+      await loadAccounts();
+    } catch (error) {
+      message.error(formatFailure('默认封面上传', error));
+    } finally {
+      setUploadingCoverId(null);
+    }
+  };
+
   const columns: TableColumnsType<PlatformAccount> = [
     {
       title: '平台',
@@ -191,9 +218,25 @@ export default function Platform() {
     {
       title: '操作',
       key: 'action',
-      width: 100,
+      width: 210,
       render: (_, record) => (
-        <Button size="small" onClick={() => openEdit(record)}>编辑</Button>
+        <Space size={8}>
+          <Button size="small" onClick={() => openEdit(record)}>编辑</Button>
+          {record.platform === 'WECHAT_OFFICIAL' && (
+            <Upload
+              accept=".jpg,.jpeg,.png,.gif,.bmp"
+              showUploadList={false}
+              beforeUpload={(file) => {
+                void handleUploadDefaultCover(record, file);
+                return Upload.LIST_IGNORE;
+              }}
+            >
+              <Button size="small" loading={uploadingCoverId === record.id}>
+                上传默认封面
+              </Button>
+            </Upload>
+          )}
+        </Space>
       ),
     },
   ];

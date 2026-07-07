@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -64,5 +66,14 @@ public class PlatformAccountController {
     ) {
         platformAccountService.updateStatus(id, request.getEnabled(), loginUser.getUserId());
         return Result.success();
+    }
+
+    @PostMapping("/{id}/wechat/default-cover")
+    public Result<PlatformAccountVO> uploadWechatDefaultCover(
+            @PathVariable Long id,
+            @RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal LoginUser loginUser
+    ) {
+        return Result.success(platformAccountService.uploadWechatDefaultCover(id, file, loginUser.getUserId()));
     }
 }
