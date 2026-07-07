@@ -36,6 +36,8 @@ public class PublishTask {
 
     private String externalDraftId;
 
+    private String externalPublishId;
+
     private String externalArticleId;
 
     private String draftUrl;

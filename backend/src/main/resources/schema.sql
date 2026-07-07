@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS publish_task (
     publish_mode VARCHAR(50) NOT NULL,
     publish_url VARCHAR(500),
     external_draft_id VARCHAR(100),
+    external_publish_id VARCHAR(255),
     external_article_id VARCHAR(100),
     draft_url VARCHAR(500),
     article_status VARCHAR(50),

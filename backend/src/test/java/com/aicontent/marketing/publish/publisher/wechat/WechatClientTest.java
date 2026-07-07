@@ -62,6 +62,71 @@ class WechatClientTest {
     }
 
     @Test
+    void submitFreePublishReadsPublishId() {
+        StubHttpClient httpClient = new StubHttpClient("""
+                {"errcode":0,"publish_id":"publish-id"}
+                """);
+        WechatClient client = new WechatClient(objectMapper, httpClient, "https://wechat.test/cgi-bin");
+
+        WechatFreePublishSubmitResponse response = client.submitFreePublish("token-value", "draft-media-id");
+
+        assertEquals("publish-id", response.publishId());
+        assertTrue(httpClient.lastRequest.uri().toString().contains("/freepublish/submit"));
+        assertTrue(httpClient.lastRequest.uri().toString().contains("access_token=token-value"));
+    }
+
+    @Test
+    void submitFreePublishWechatErrorBecomesBusinessException() {
+        WechatClient client = new WechatClient(objectMapper, new StubHttpClient("""
+                {"errcode":48001,"errmsg":"api unauthorized"}
+                """), "https://wechat.test/cgi-bin");
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> client.submitFreePublish("token-value", "draft-media-id")
+        );
+
+        assertEquals("提交微信公众号发布失败：api unauthorized", exception.getMessage());
+    }
+
+    @Test
+    void getFreePublishStatusReadsSuccessArticleUrl() {
+        WechatClient client = new WechatClient(objectMapper, new StubHttpClient("""
+                {"errcode":0,"publish_status":0,"article_id":"article-id","article_detail":{"item":[{"article_url":"https://mp.weixin.qq.com/s/article"}]}}
+                """), "https://wechat.test/cgi-bin");
+
+        WechatPublishStatusResult result = client.getFreePublishStatus("token-value", "publish-id");
+
+        assertTrue(result.success());
+        assertEquals("article-id", result.articleId());
+        assertEquals("https://mp.weixin.qq.com/s/article", result.articleUrl());
+    }
+
+    @Test
+    void getFreePublishStatusReadsProcessing() {
+        WechatClient client = new WechatClient(objectMapper, new StubHttpClient("""
+                {"errcode":0,"publish_status":1}
+                """), "https://wechat.test/cgi-bin");
+
+        WechatPublishStatusResult result = client.getFreePublishStatus("token-value", "publish-id");
+
+        assertTrue(result.processing());
+        assertEquals(1, result.publishStatus());
+    }
+
+    @Test
+    void getFreePublishStatusReadsFailedStatus() {
+        WechatClient client = new WechatClient(objectMapper, new StubHttpClient("""
+                {"errcode":0,"publish_status":2,"errmsg":"publish failed"}
+                """), "https://wechat.test/cgi-bin");
+
+        WechatPublishStatusResult result = client.getFreePublishStatus("token-value", "publish-id");
+
+        assertTrue(result.failed());
+        assertTrue(result.errorMessage().contains("publish failed"));
+    }
+
+    @Test
     void uploadPermanentImageMaterialSendsCurlLikeMultipartAndReadsMediaIdAndUrl() throws Exception {
         try (LocalWechatServer server = LocalWechatServer.success("""
                 {"media_id":"cover-media-id","url":"https://mmbiz.qpic.cn/cover.jpg"}

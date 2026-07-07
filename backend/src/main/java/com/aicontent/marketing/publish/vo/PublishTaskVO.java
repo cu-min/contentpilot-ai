@@ -38,6 +38,8 @@ public class PublishTaskVO {
 
     private String externalDraftId;
 
+    private String externalPublishId;
+
     private String externalArticleId;
 
     private String draftUrl;
@@ -70,6 +72,7 @@ public class PublishTaskVO {
         vo.setPublishMode(task.getPublishMode());
         vo.setPublishUrl(task.getPublishUrl());
         vo.setExternalDraftId(task.getExternalDraftId());
+        vo.setExternalPublishId(task.getExternalPublishId());
         vo.setExternalArticleId(task.getExternalArticleId());
         vo.setDraftUrl(task.getDraftUrl());
         vo.setArticleStatus(task.getArticleStatus());

@@ -64,6 +64,16 @@ public class WechatOfficialApiPublisher implements PlatformPublisher {
                     )
             )));
             String mediaId = response.mediaId();
+            if (!config.draftOnly()) {
+                WechatFreePublishSubmitResponse submitResponse = wechatClient.submitFreePublish(accessToken, mediaId);
+                return PublishResult.submitted(
+                        "wechat-publish:" + submitResponse.publishId(),
+                        mediaId,
+                        submitResponse.publishId(),
+                        null,
+                        "已提交微信发布，等待平台确认"
+                );
+            }
             return PublishResult.success(
                     "wechat-draft:" + mediaId,
                     mediaId,

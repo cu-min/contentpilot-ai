@@ -280,6 +280,8 @@ export default function Publish() {
       const result = await executePublishTask(record.id);
       if (result.data.status === 'SUCCESS') {
         message.success(record.platform === 'WECHAT_OFFICIAL' ? '公众号草稿创建成功' : '自动发布成功');
+      } else if (result.data.status === 'RUNNING' && result.data.platform === 'WECHAT_OFFICIAL' && result.data.externalPublishId) {
+        message.info('已提交微信发布，等待平台确认');
       } else {
         message.error(`自动发布失败：${result.data.errorMessage || getPublishTaskStatusLabel(result.data.status) || '发布失败'}`);
       }
@@ -295,21 +297,45 @@ export default function Publish() {
     setRefreshing(true);
     try {
       const refreshableTasks = tasks.filter((task) => (
-        task.platform === 'JUEJIN'
-        && task.status === 'SUCCESS'
-        && Boolean(task.externalArticleId || task.publishUrl || task.externalDraftId || task.draftUrl)
+        (
+          task.platform === 'WECHAT_OFFICIAL'
+          && task.status === 'RUNNING'
+          && Boolean(task.externalPublishId)
+        )
+        || (
+          task.platform === 'JUEJIN'
+          && task.status === 'SUCCESS'
+          && Boolean(task.externalArticleId || task.publishUrl || task.externalDraftId || task.draftUrl)
+        )
       ));
       if (refreshableTasks.length > 0) {
         const results = await Promise.allSettled(
           refreshableTasks.map((task) => refreshPublishTaskStatus(task.id)),
         );
         const failedCount = results.filter((result) => result.status === 'rejected').length;
-        if (failedCount > 0) {
-          message.warning(`${failedCount} 条掘金文章状态刷新失败，请稍后重试`);
+        const fulfilled = results
+          .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof refreshPublishTaskStatus>>> => result.status === 'fulfilled')
+          .map((result) => result.value.data);
+        const wechatSuccessCount = fulfilled.filter((task) => task.platform === 'WECHAT_OFFICIAL' && task.status === 'SUCCESS').length;
+        const wechatProcessingCount = fulfilled.filter((task) => task.platform === 'WECHAT_OFFICIAL' && task.status === 'RUNNING').length;
+        const wechatFailedCount = fulfilled.filter((task) => task.platform === 'WECHAT_OFFICIAL' && isFailureStatus(task.status)).length;
+        if (wechatSuccessCount > 0) {
+          message.success(`${wechatSuccessCount} 条微信公众号发布成功`);
         }
+        if (wechatProcessingCount > 0) {
+          message.info('微信发布仍在处理中，请稍后刷新');
+        }
+        if (wechatFailedCount > 0) {
+          message.error(`${wechatFailedCount} 条微信公众号发布失败`);
+        }
+        if (failedCount > 0) {
+          message.warning(`${failedCount} 条任务状态刷新失败，请稍后重试`);
+        }
+      } else {
+        message.info('当前列表没有需要同步的平台状态');
       }
       const success = await loadTasks(pagination.current, pagination.pageSize);
-      if (success) {
+      if (success && refreshableTasks.length === 0) {
         message.success('状态已刷新');
       }
     } finally {
@@ -340,6 +366,9 @@ export default function Publish() {
 
   const articleStatus = (record: PublishTask) => {
     if (record.status === 'DRAFT' || record.status === 'PENDING') return null;
+    if (record.status === 'RUNNING' && record.platform === 'WECHAT_OFFICIAL' && record.externalPublishId) {
+      return { label: '微信确认中', color: 'blue' };
+    }
     if (record.status === 'RUNNING') return { label: '发布中', color: 'blue' };
     if (record.articleStatus === 'PUBLISHED') return { label: '已发布', color: 'success' };
     if (record.articleStatus === 'REJECTED') return { label: '未通过', color: 'error' };
@@ -365,9 +394,15 @@ export default function Publish() {
 
   const isWechatDraftUrl = (url?: string) => Boolean(url?.startsWith('wechat-draft:'));
 
+  const isWechatPublishUrl = (url?: string) => Boolean(url?.startsWith('wechat-publish:'));
+
   const handleViewResult = (record: PublishTask) => {
     const url = record.publishUrl || record.draftUrl;
-    if (!url || isWechatDraftUrl(url)) {
+    if (!url || isWechatDraftUrl(url) || isWechatPublishUrl(url)) {
+      if (isWechatPublishUrl(url)) {
+        message.info(`微信 publish_id：${url?.replace('wechat-publish:', '') || ''}`);
+        return;
+      }
       message.info(url ? `微信公众号草稿 media_id：${url.replace('wechat-draft:', '')}` : '暂无结果链接');
       return;
     }
@@ -488,6 +523,9 @@ export default function Publish() {
         if (record.status === 'SUCCESS' && isWechatDraftUrl(record.publishUrl)) {
           return <Typography.Text>草稿创建成功</Typography.Text>;
         }
+        if (record.status === 'RUNNING' && record.platform === 'WECHAT_OFFICIAL' && record.externalPublishId) {
+          return <Typography.Text>微信发布确认中</Typography.Text>;
+        }
         if (isFailureStatus(record.status)) {
           return (
             <Typography.Text type="danger" ellipsis={{ tooltip: record.errorMessage }}>
@@ -526,7 +564,7 @@ export default function Publish() {
             type="info"
             showIcon
             message="JUEJIN + UNOFFICIAL_API 会访问真实掘金接口。"
-            description="WECHAT_OFFICIAL + OFFICIAL_API 会创建公众号草稿；掘金账号需要配置 cookie、defaultCategoryId、defaultTagIds。发布后可点击刷新状态同步掘金文章状态。"
+            description="WECHAT_OFFICIAL + OFFICIAL_API 默认创建公众号草稿；账号配置 draftOnly=false 后会提交微信正式发布，发布后可点击刷新状态同步微信确认结果和掘金文章状态。"
           />
           <Form form={filterForm} layout="inline" onFinish={() => loadTasks(1, pagination.pageSize)}>
             <Form.Item name="platform">

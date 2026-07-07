@@ -39,6 +39,7 @@ export interface PublishTask {
   publishMode: PublishMode;
   publishUrl?: string;
   externalDraftId?: string;
+  externalPublishId?: string;
   externalArticleId?: string;
   draftUrl?: string;
   articleStatus?: PublishArticleStatus;

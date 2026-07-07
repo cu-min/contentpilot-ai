@@ -3,6 +3,7 @@ package com.aicontent.marketing.publish.publisher.wechat;
 import com.aicontent.marketing.common.exception.BusinessException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.entity.mime.HttpMultipartMode;
@@ -116,6 +117,56 @@ public class WechatClient {
         }
     }
 
+    public WechatFreePublishSubmitResponse submitFreePublish(String accessToken, String mediaId) {
+        try {
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("media_id", mediaId);
+            String url = baseUrl + "/freepublish/submit?access_token=" + encode(accessToken);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(TIMEOUT)
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            log.info("Wechat freepublish/submit request completed: status={}, body={}",
+                    response.statusCode(), truncate(response.body()));
+            JsonNode root = readSuccessfulBody(response.statusCode(), response.body(), "提交微信公众号发布失败", true);
+            String publishId = root.path("publish_id").asText();
+            if (!StringUtils.hasText(publishId)) {
+                throw new BusinessException("提交微信公众号发布失败：响应中缺少 publish_id");
+            }
+            return new WechatFreePublishSubmitResponse(publishId);
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException("提交微信公众号发布失败：" + safeMessage(exception));
+        }
+    }
+
+    public WechatPublishStatusResult getFreePublishStatus(String accessToken, String publishId) {
+        try {
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("publish_id", publishId);
+            String url = baseUrl + "/freepublish/get?access_token=" + encode(accessToken);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(TIMEOUT)
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            log.info("Wechat freepublish/get request completed: status={}, body={}",
+                    response.statusCode(), truncate(response.body()));
+            JsonNode root = readSuccessfulBody(response.statusCode(), response.body(), "查询微信公众号发布状态失败", true);
+            return parsePublishStatus(root, truncate(response.body()));
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException("查询微信公众号发布状态失败：" + safeMessage(exception));
+        }
+    }
+
     public WechatMaterialUploadResponse uploadPermanentImageMaterial(String accessToken, MultipartFile file) {
         try {
             String url = baseUrl + "/material/add_material?access_token=" + encode(accessToken) + "&type=image";
@@ -193,6 +244,65 @@ public class WechatClient {
             throw new BusinessException(failurePrefix + "，微信接口返回错误：" + truncate(errMsg));
         }
         return root;
+    }
+
+    private WechatPublishStatusResult parsePublishStatus(JsonNode root, String rawSummary) {
+        Integer publishStatus = root.has("publish_status") && root.path("publish_status").canConvertToInt()
+                ? root.path("publish_status").asInt()
+                : null;
+        String articleId = firstText(root, "article_id");
+        String articleUrl = firstText(root, "article_url");
+        JsonNode item = root.path("article_detail").path("item");
+        if (item.isArray() && !item.isEmpty()) {
+            JsonNode firstItem = item.get(0);
+            if (!StringUtils.hasText(articleId)) {
+                articleId = firstText(firstItem, "article_id");
+            }
+            if (!StringUtils.hasText(articleUrl)) {
+                articleUrl = firstText(firstItem, "article_url");
+            }
+        }
+
+        if (Integer.valueOf(0).equals(publishStatus)) {
+            if (!StringUtils.hasText(articleUrl)) {
+                return WechatPublishStatusResult.failed(
+                        publishStatus,
+                        "未获取到微信正式文章链接：" + rawSummary,
+                        rawSummary
+                );
+            }
+            return WechatPublishStatusResult.success(publishStatus, articleId, articleUrl, rawSummary);
+        }
+        if (Integer.valueOf(1).equals(publishStatus)) {
+            return WechatPublishStatusResult.processing(publishStatus, rawSummary);
+        }
+        if (Integer.valueOf(2).equals(publishStatus) || Integer.valueOf(3).equals(publishStatus)) {
+            return WechatPublishStatusResult.failed(
+                    publishStatus,
+                    "微信发布失败：" + firstNonBlank(firstText(root, "errmsg"), rawSummary),
+                    rawSummary
+            );
+        }
+        return WechatPublishStatusResult.failed(
+                publishStatus,
+                "未知发布状态：" + rawSummary,
+                rawSummary
+        );
+    }
+
+    private String firstText(JsonNode root, String field) {
+        JsonNode value = root.path(field);
+        if (value.isTextual() && StringUtils.hasText(value.asText())) {
+            return value.asText();
+        }
+        if (value.isNumber()) {
+            return value.asText();
+        }
+        return "";
+    }
+
+    private String firstNonBlank(String first, String fallback) {
+        return StringUtils.hasText(first) ? first : fallback;
     }
 
     private String encode(String value) {

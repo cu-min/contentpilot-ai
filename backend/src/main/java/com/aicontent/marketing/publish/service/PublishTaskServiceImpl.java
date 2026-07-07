@@ -16,6 +16,10 @@ import com.aicontent.marketing.publish.publisher.PublishResult;
 import com.aicontent.marketing.publish.publisher.PublisherRegistry;
 import com.aicontent.marketing.publish.publisher.juejin.JuejinAuthConfig;
 import com.aicontent.marketing.publish.publisher.juejin.JuejinClient;
+import com.aicontent.marketing.publish.publisher.wechat.WechatAccessTokenCache;
+import com.aicontent.marketing.publish.publisher.wechat.WechatAuthConfig;
+import com.aicontent.marketing.publish.publisher.wechat.WechatClient;
+import com.aicontent.marketing.publish.publisher.wechat.WechatPublishStatusResult;
 import com.aicontent.marketing.publish.vo.PublishTaskVO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -64,6 +68,8 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     private final PlatformAccountMapper platformAccountMapper;
     private final PublisherRegistry publisherRegistry;
     private final JuejinClient juejinClient;
+    private final WechatClient wechatClient;
+    private final WechatAccessTokenCache wechatAccessTokenCache;
     private final ObjectMapper objectMapper;
 
     public PublishTaskServiceImpl(
@@ -71,12 +77,16 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
             PlatformAccountMapper platformAccountMapper,
             PublisherRegistry publisherRegistry,
             JuejinClient juejinClient,
+            WechatClient wechatClient,
+            WechatAccessTokenCache wechatAccessTokenCache,
             ObjectMapper objectMapper
     ) {
         this.platformContentMapper = platformContentMapper;
         this.platformAccountMapper = platformAccountMapper;
         this.publisherRegistry = publisherRegistry;
         this.juejinClient = juejinClient;
+        this.wechatClient = wechatClient;
+        this.wechatAccessTokenCache = wechatAccessTokenCache;
         this.objectMapper = objectMapper;
     }
 
@@ -178,6 +188,7 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         task.setStatus(STATUS_RUNNING);
         task.setPublishUrl(null);
         task.setExternalArticleId(null);
+        task.setExternalPublishId(null);
         task.setArticleStatus(null);
         task.setErrorMessage(null);
         task.setUpdatedBy(currentUserId);
@@ -188,7 +199,12 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         try {
             PublishResult result = publisher.publish(toPublishContext(task, platformContent, account));
             fillExternalResult(task, result);
-            if (result.success()) {
+            if (result.submitted()) {
+                task.setStatus(STATUS_RUNNING);
+                task.setPublishUrl(result.publishUrl());
+                task.setArticleStatus(ARTICLE_STATUS_SUBMITTED);
+                task.setErrorMessage(null);
+            } else if (result.success()) {
                 task.setStatus(STATUS_SUCCESS);
                 task.setPublishUrl(result.publishUrl());
                 task.setArticleStatus(resolveSuccessArticleStatus(result));
@@ -215,6 +231,9 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     @Transactional
     public PublishTaskVO refreshArticleStatus(Long id, Long currentUserId) {
         PublishTask task = getRequiredTask(id);
+        if ("WECHAT_OFFICIAL".equals(task.getPlatform())) {
+            return refreshWechatPublishStatus(task, currentUserId);
+        }
         if (!"JUEJIN".equals(task.getPlatform()) || !STATUS_SUCCESS.equals(task.getStatus())) {
             return toVO(task);
         }
@@ -227,6 +246,40 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         JuejinAuthConfig config = JuejinAuthConfig.parse(account.getAuthConfig(), objectMapper);
         JuejinClient.JuejinArticleStatusResult result = juejinClient.queryArticleStatus(config, articleId);
         fillRefreshedArticleStatus(task, result);
+        task.setUpdatedBy(currentUserId);
+        task.setUpdatedAt(LocalDateTime.now());
+        updateById(task);
+        return toVO(task);
+    }
+
+    private PublishTaskVO refreshWechatPublishStatus(PublishTask task, Long currentUserId) {
+        if (!STATUS_RUNNING.equals(task.getStatus())) {
+            throw new BusinessException("当前任务不是微信发布确认中，无需刷新");
+        }
+        if (!StringUtils.hasText(task.getExternalPublishId())) {
+            throw new BusinessException("当前任务缺少微信 publish_id，无法刷新状态");
+        }
+        PlatformAccount account = getRequiredAccount(task.getAccountId());
+        WechatAuthConfig config = WechatAuthConfig.parseForDefaultCoverUpload(account.getAuthConfig(), objectMapper);
+        String accessToken = wechatAccessTokenCache.getToken(config.appId(), config.appSecret(), wechatClient);
+        WechatPublishStatusResult result = wechatClient.getFreePublishStatus(accessToken, task.getExternalPublishId());
+        if (result.success()) {
+            task.setStatus(STATUS_SUCCESS);
+            task.setExternalArticleId(result.articleId());
+            task.setPublishUrl(result.articleUrl());
+            task.setArticleStatus(ARTICLE_STATUS_PUBLISHED);
+            task.setErrorMessage(null);
+        } else if (result.failed()) {
+            task.setStatus(STATUS_FAILED);
+            task.setArticleStatus(ARTICLE_STATUS_FAILED);
+            task.setErrorMessage(StringUtils.hasText(result.errorMessage())
+                    ? result.errorMessage()
+                    : "微信发布失败：" + result.rawSummary());
+        } else {
+            task.setStatus(STATUS_RUNNING);
+            task.setArticleStatus(ARTICLE_STATUS_REVIEWING);
+            task.setErrorMessage(null);
+        }
         task.setUpdatedBy(currentUserId);
         task.setUpdatedAt(LocalDateTime.now());
         updateById(task);
@@ -263,6 +316,9 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     private void fillExternalResult(PublishTask task, PublishResult result) {
         if (StringUtils.hasText(result.draftId())) {
             task.setExternalDraftId(result.draftId());
+        }
+        if (StringUtils.hasText(result.publishId())) {
+            task.setExternalPublishId(result.publishId());
         }
         if (StringUtils.hasText(result.draftUrl())) {
             task.setDraftUrl(result.draftUrl());

@@ -17,6 +17,7 @@ public class PublishTaskSchemaMigration {
     @PostConstruct
     public void migrate() {
         addColumnIfMissing("external_draft_id", "VARCHAR(100)");
+        addColumnIfMissing("external_publish_id", "VARCHAR(255)");
         addColumnIfMissing("external_article_id", "VARCHAR(100)");
         addColumnIfMissing("draft_url", "VARCHAR(500)");
         addColumnIfMissing("article_status", "VARCHAR(50)");
