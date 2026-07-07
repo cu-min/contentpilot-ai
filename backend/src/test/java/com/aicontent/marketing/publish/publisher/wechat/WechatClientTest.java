@@ -1,23 +1,23 @@
 package com.aicontent.marketing.publish.publisher.wechat;
 
 import com.aicontent.marketing.common.exception.BusinessException;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.http.client.ClientHttpRequest;
-import org.springframework.mock.http.client.MockClientHttpRequest;
-import org.springframework.test.web.client.MockRestServiceServer;
-import org.springframework.test.web.client.match.MockRestRequestMatchers;
-import org.springframework.test.web.client.response.MockRestResponseCreators;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -62,89 +62,79 @@ class WechatClientTest {
     }
 
     @Test
-    void uploadPermanentImageMaterialReadsMediaIdAndUrl() {
-        RestTemplate restTemplate = new RestTemplate();
-        MockRestServiceServer server = MockRestServiceServer.createServer(restTemplate);
-        server.expect(MockRestRequestMatchers.requestTo("https://wechat.test/cgi-bin/material/add_material?access_token=token-value&type=image"))
-                .andExpect(MockRestRequestMatchers.method(HttpMethod.POST))
-                .andExpect(request -> {
-                    String contentType = request.getHeaders().getFirst("Content-Type");
-                    assertTrue(contentType != null && contentType.startsWith("multipart/form-data;boundary="));
-                    String body = readBody(request);
-                    assertTrue(body.contains("name=\"media\""));
-                    assertTrue(body.contains("filename=\"cover.jpg\""));
-                    assertTrue(body.contains("Content-Type: image/jpeg"));
-                    assertTrue(body.contains("image-bytes"));
-                })
-                .andRespond(MockRestResponseCreators.withSuccess("""
-                        {"media_id":"cover-media-id","url":"https://mmbiz.qpic.cn/cover.jpg"}
-                        """, MediaType.APPLICATION_JSON));
-        WechatClient client = new WechatClient(
-                objectMapper,
-                new StubHttpClient("{}"),
-                restTemplate,
-                "https://wechat.test/cgi-bin"
-        );
-        MockMultipartFile file = new MockMultipartFile("file", "cover.jpg", "image/jpeg", "image-bytes".getBytes());
+    void uploadPermanentImageMaterialSendsCurlLikeMultipartAndReadsMediaIdAndUrl() throws Exception {
+        try (LocalWechatServer server = LocalWechatServer.success("""
+                {"media_id":"cover-media-id","url":"https://mmbiz.qpic.cn/cover.jpg"}
+                """)) {
+            WechatClient client = new WechatClient(
+                    objectMapper,
+                    new StubHttpClient("{}"),
+                    HttpClients.createDefault(),
+                    server.baseUrl()
+            );
+            MockMultipartFile file = new MockMultipartFile("file", "截图.png", "image/png", "image-bytes".getBytes());
 
-        WechatMaterialUploadResponse response = client.uploadPermanentImageMaterial("token-value", file);
+            WechatMaterialUploadResponse response = client.uploadPermanentImageMaterial("token-value", file);
 
-        assertEquals("cover-media-id", response.mediaId());
-        assertEquals("https://mmbiz.qpic.cn/cover.jpg", response.url());
-        server.verify();
+            CapturedRequest request = server.captured();
+            assertEquals("POST", request.method());
+            assertEquals("/cgi-bin/material/add_material?access_token=token-value&type=image", request.rawPathAndQuery());
+            assertTrue(request.firstHeader("Content-Type").startsWith("multipart/form-data"));
+            assertTrue(request.firstHeader("Content-Type").contains("boundary="));
+            assertEquals(null, request.firstHeader("Transfer-Encoding"));
+            assertTrue(Long.parseLong(request.firstHeader("Content-Length")) > 0);
+            assertTrue(request.body().contains("name=\"media\""));
+            assertTrue(request.body().contains("filename=\"cover.png\""));
+            assertTrue(request.body().contains("Content-Type: image/png"));
+            assertTrue(request.body().contains("image-bytes"));
+            assertEquals("cover-media-id", response.mediaId());
+            assertEquals("https://mmbiz.qpic.cn/cover.jpg", response.url());
+        }
     }
 
     @Test
-    void uploadPermanentImageMaterialUsesSimpleWechatErrorMessage() {
-        RestTemplate restTemplate = new RestTemplate();
-        MockRestServiceServer server = MockRestServiceServer.createServer(restTemplate);
-        server.expect(MockRestRequestMatchers.requestTo("https://wechat.test/cgi-bin/material/add_material?access_token=token-value&type=image"))
-                .andRespond(MockRestResponseCreators.withSuccess("""
-                        {"errcode":40007,"errmsg":"invalid media_id"}
-                        """, MediaType.APPLICATION_JSON));
-        WechatClient client = new WechatClient(
-                objectMapper,
-                new StubHttpClient("{}"),
-                restTemplate,
-                "https://wechat.test/cgi-bin"
-        );
-        MockMultipartFile file = new MockMultipartFile("file", "cover.jpg", "image/jpeg", "image-bytes".getBytes());
+    void uploadPermanentImageMaterialUsesSimpleWechatErrorMessage() throws Exception {
+        try (LocalWechatServer server = LocalWechatServer.success("""
+                {"errcode":40007,"errmsg":"invalid media_id"}
+                """)) {
+            WechatClient client = new WechatClient(
+                    objectMapper,
+                    new StubHttpClient("{}"),
+                    HttpClients.createDefault(),
+                    server.baseUrl()
+            );
+            MockMultipartFile file = new MockMultipartFile("file", "cover.jpg", "image/jpeg", "image-bytes".getBytes());
 
-        BusinessException exception = assertThrows(
-                BusinessException.class,
-                () -> client.uploadPermanentImageMaterial("token-value", file)
-        );
+            BusinessException exception = assertThrows(
+                    BusinessException.class,
+                    () -> client.uploadPermanentImageMaterial("token-value", file)
+            );
 
-        assertEquals("上传微信公众号默认封面失败：invalid media_id", exception.getMessage());
-        server.verify();
+            assertEquals("上传微信公众号默认封面失败：invalid media_id", exception.getMessage());
+        }
     }
 
     @Test
-    void uploadPermanentImageMaterialIncludesHttpErrorBody() {
-        RestTemplate restTemplate = new RestTemplate();
-        MockRestServiceServer server = MockRestServiceServer.createServer(restTemplate);
-        server.expect(MockRestRequestMatchers.requestTo("https://wechat.test/cgi-bin/material/add_material?access_token=token-value&type=image"))
-                .andRespond(MockRestResponseCreators.withStatus(org.springframework.http.HttpStatus.PRECONDITION_FAILED)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .body("""
-                                {"errcode":41005,"errmsg":"media data missing"}
-                                """));
-        WechatClient client = new WechatClient(
-                objectMapper,
-                new StubHttpClient("{}"),
-                restTemplate,
-                "https://wechat.test/cgi-bin"
-        );
-        MockMultipartFile file = new MockMultipartFile("file", "cover.jpg", "image/jpeg", "image-bytes".getBytes());
+    void uploadPermanentImageMaterialIncludesHttpErrorBody() throws Exception {
+        try (LocalWechatServer server = LocalWechatServer.error(412, """
+                {"errcode":41005,"errmsg":"media data missing"}
+                """)) {
+            WechatClient client = new WechatClient(
+                    objectMapper,
+                    new StubHttpClient("{}"),
+                    HttpClients.createDefault(),
+                    server.baseUrl()
+            );
+            MockMultipartFile file = new MockMultipartFile("file", "cover.jpg", "image/jpeg", "image-bytes".getBytes());
 
-        BusinessException exception = assertThrows(
-                BusinessException.class,
-                () -> client.uploadPermanentImageMaterial("token-value", file)
-        );
+            BusinessException exception = assertThrows(
+                    BusinessException.class,
+                    () -> client.uploadPermanentImageMaterial("token-value", file)
+            );
 
-        assertTrue(exception.getMessage().contains("HTTP 状态码：412"));
-        assertTrue(exception.getMessage().contains("media data missing"));
-        server.verify();
+            assertTrue(exception.getMessage().contains("HTTP 状态码：412"));
+            assertTrue(exception.getMessage().contains("media data missing"));
+        }
     }
 
     @Test
@@ -269,7 +259,72 @@ class WechatClientTest {
         }
     }
 
-    private static String readBody(ClientHttpRequest request) throws IOException {
-        return ((MockClientHttpRequest) request).getBodyAsString(StandardCharsets.UTF_8);
+    private static class LocalWechatServer implements AutoCloseable {
+
+        private final HttpServer server;
+        private final AtomicReference<CapturedRequest> captured = new AtomicReference<>();
+
+        private LocalWechatServer(int status, String responseBody) throws IOException {
+            this.server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.createContext("/cgi-bin/material/add_material", exchange -> handle(exchange, status, responseBody));
+            server.start();
+        }
+
+        private static LocalWechatServer success(String responseBody) throws IOException {
+            return new LocalWechatServer(200, responseBody);
+        }
+
+        private static LocalWechatServer error(int status, String responseBody) throws IOException {
+            return new LocalWechatServer(status, responseBody);
+        }
+
+        private String baseUrl() {
+            return "http://127.0.0.1:" + server.getAddress().getPort() + "/cgi-bin";
+        }
+
+        private CapturedRequest captured() {
+            return captured.get();
+        }
+
+        private void handle(HttpExchange exchange, int status, String responseBody) throws IOException {
+            ByteArrayOutputStream body = new ByteArrayOutputStream();
+            exchange.getRequestBody().transferTo(body);
+            captured.set(new CapturedRequest(
+                    exchange.getRequestMethod(),
+                    exchange.getRequestURI().toString(),
+                    exchange.getRequestHeaders(),
+                    body.toString(StandardCharsets.UTF_8)
+            ));
+            byte[] responseBytes = responseBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+            exchange.sendResponseHeaders(status, responseBytes.length);
+            exchange.getResponseBody().write(responseBytes);
+            exchange.close();
+        }
+
+        @Override
+        public void close() {
+            server.stop(0);
+        }
+    }
+
+    private record CapturedRequest(
+            String method,
+            String rawPathAndQuery,
+            Map<String, List<String>> headers,
+            String body
+    ) {
+
+        private String firstHeader(String name) {
+            List<String> values = headers.get(name);
+            if (values == null) {
+                values = headers.entrySet().stream()
+                        .filter(entry -> entry.getKey().equalsIgnoreCase(name))
+                        .map(Map.Entry::getValue)
+                        .findFirst()
+                        .orElse(null);
+            }
+            return values == null || values.isEmpty() ? null : values.get(0);
+        }
     }
 }

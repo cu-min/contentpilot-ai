@@ -3,23 +3,22 @@ package com.aicontent.marketing.publish.publisher.wechat;
 import com.aicontent.marketing.common.exception.BusinessException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.hc.client5.http.classic.methods.HttpPost;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.entity.mime.HttpMultipartMode;
+import org.apache.hc.client5.http.entity.mime.MultipartEntityBuilder;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.hc.core5.util.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
-import org.springframework.web.client.RestClientResponseException;
-import org.springframework.web.client.RestOperations;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URI;
@@ -41,24 +40,29 @@ public class WechatClient {
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
-    private final RestOperations restOperations;
+    private final CloseableHttpClient apacheHttpClient;
     private final String baseUrl;
 
     @Autowired
     public WechatClient(ObjectMapper objectMapper) {
         this(objectMapper, HttpClient.newBuilder()
                 .connectTimeout(TIMEOUT)
-                .build(), new RestTemplate(), DEFAULT_BASE_URL);
+                .build(), HttpClients.createDefault(), DEFAULT_BASE_URL);
     }
 
     WechatClient(ObjectMapper objectMapper, HttpClient httpClient, String baseUrl) {
-        this(objectMapper, httpClient, new RestTemplate(), baseUrl);
+        this(objectMapper, httpClient, HttpClients.createDefault(), baseUrl);
     }
 
-    WechatClient(ObjectMapper objectMapper, HttpClient httpClient, RestOperations restOperations, String baseUrl) {
+    WechatClient(
+            ObjectMapper objectMapper,
+            HttpClient httpClient,
+            CloseableHttpClient apacheHttpClient,
+            String baseUrl
+    ) {
         this.objectMapper = objectMapper;
         this.httpClient = httpClient;
-        this.restOperations = restOperations;
+        this.apacheHttpClient = apacheHttpClient;
         this.baseUrl = baseUrl;
     }
 
@@ -115,16 +119,43 @@ public class WechatClient {
     public WechatMaterialUploadResponse uploadPermanentImageMaterial(String accessToken, MultipartFile file) {
         try {
             String url = baseUrl + "/material/add_material?access_token=" + encode(accessToken) + "&type=image";
-            ResponseEntity<String> response = restOperations.exchange(
-                    url,
-                    HttpMethod.POST,
-                    buildMultipartRequest(file),
-                    String.class
+            byte[] fileBytes = file.getBytes();
+            String filename = safeCoverFilename(file.getOriginalFilename());
+            ContentType contentType = parseApacheContentType(file.getContentType(), filename);
+            org.apache.hc.core5.http.HttpEntity entity = MultipartEntityBuilder.create()
+                    .setMode(HttpMultipartMode.LEGACY)
+                    .addBinaryBody("media", fileBytes, contentType, filename)
+                    .build();
+            if (entity.getContentLength() <= 0 || entity.isChunked()) {
+                throw new BusinessException("上传微信公众号默认封面失败：multipart 请求体构造异常");
+            }
+            log.info(
+                    "Wechat material upload request prepared: fileSize={}, filename={}, contentType={}, multipartContentLength={}, chunked={}",
+                    fileBytes.length,
+                    filename,
+                    contentType,
+                    entity.getContentLength(),
+                    entity.isChunked()
             );
-            log.info("Wechat material/add_material request completed: status={}", response.getStatusCode().value());
+
+            HttpPost post = new HttpPost(url);
+            post.setConfig(RequestConfig.custom()
+                    .setResponseTimeout(Timeout.ofSeconds(TIMEOUT.toSeconds()))
+                    .setConnectionRequestTimeout(Timeout.ofSeconds(TIMEOUT.toSeconds()))
+                    .build());
+            post.setEntity(entity);
+
+            WechatHttpResponse response = apacheHttpClient.execute(post, httpResponse -> new WechatHttpResponse(
+                    httpResponse.getCode(),
+                    httpResponse.getEntity() == null
+                            ? ""
+                            : EntityUtils.toString(httpResponse.getEntity(), StandardCharsets.UTF_8)
+            ));
+            log.info("Wechat material/add_material request completed: status={}, body={}",
+                    response.statusCode(), truncate(response.body()));
             JsonNode root = readSuccessfulBody(
-                    response.getStatusCode().value(),
-                    response.getBody(),
+                    response.statusCode(),
+                    response.body(),
                     "上传微信公众号默认封面失败",
                     true
             );
@@ -133,39 +164,11 @@ public class WechatClient {
                 throw new BusinessException("上传微信公众号默认封面失败：响应中缺少 media_id");
             }
             return new WechatMaterialUploadResponse(mediaId, root.path("url").asText(""));
-        } catch (RestClientResponseException exception) {
-            String bodySummary = truncate(exception.getResponseBodyAsString(StandardCharsets.UTF_8));
-            log.warn("Wechat material/add_material request failed: status={}, body={}",
-                    exception.getStatusCode().value(), bodySummary);
-            throw new BusinessException("上传微信公众号默认封面失败，HTTP 状态码："
-                    + exception.getStatusCode().value() + "，响应：" + bodySummary);
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
             throw new BusinessException("上传微信公众号默认封面失败：" + safeMessage(exception));
         }
-    }
-
-    private HttpEntity<MultiValueMap<String, Object>> buildMultipartRequest(MultipartFile file) throws Exception {
-        HttpHeaders requestHeaders = new HttpHeaders();
-        requestHeaders.setContentType(MediaType.MULTIPART_FORM_DATA);
-
-        HttpHeaders partHeaders = new HttpHeaders();
-        partHeaders.setContentType(parseContentType(file.getContentType()));
-        partHeaders.setContentDisposition(ContentDisposition.formData()
-                .name("media")
-                .filename(safeCoverFilename(file.getOriginalFilename()))
-                .build());
-
-        ByteArrayResource resource = new ByteArrayResource(file.getBytes()) {
-            @Override
-            public String getFilename() {
-                return safeCoverFilename(file.getOriginalFilename());
-            }
-        };
-        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        body.add("media", new HttpEntity<>(resource, partHeaders));
-        return new HttpEntity<>(body, requestHeaders);
     }
 
     private JsonNode readSuccessfulBody(HttpResponse<String> response, String failurePrefix) throws Exception {
@@ -209,15 +212,28 @@ public class WechatClient {
         return value.substring(0, MAX_ERROR_LENGTH);
     }
 
-    private MediaType parseContentType(String contentType) {
+    private ContentType parseApacheContentType(String contentType, String filename) {
         if (!StringUtils.hasText(contentType)) {
-            return MediaType.APPLICATION_OCTET_STREAM;
+            return contentTypeFromFilename(filename);
         }
         try {
-            return MediaType.parseMediaType(contentType);
+            return ContentType.parse(contentType);
         } catch (Exception ignored) {
-            return MediaType.APPLICATION_OCTET_STREAM;
+            return contentTypeFromFilename(filename);
         }
+    }
+
+    private ContentType contentTypeFromFilename(String filename) {
+        if (filename.endsWith(".png")) {
+            return ContentType.IMAGE_PNG;
+        }
+        if (filename.endsWith(".gif")) {
+            return ContentType.IMAGE_GIF;
+        }
+        if (filename.endsWith(".bmp")) {
+            return ContentType.create("image/bmp");
+        }
+        return ContentType.IMAGE_JPEG;
     }
 
     private String safeCoverFilename(String originalFilename) {
@@ -229,5 +245,8 @@ public class WechatClient {
             }
         }
         return "cover." + extension;
+    }
+
+    private record WechatHttpResponse(int statusCode, String body) {
     }
 }
