@@ -42,11 +42,14 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     private static final String STATUS_RUNNING = "RUNNING";
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_FAILED = "FAILED";
+    private static final String STATUS_NEED_MANUAL_CONFIRM = "NEED_MANUAL_CONFIRM";
+    private static final String STATUS_CONTENT_REJECTED = "CONTENT_REJECTED";
     private static final String ARTICLE_STATUS_REVIEWING = "REVIEWING";
     private static final String ARTICLE_STATUS_PUBLISHED = "PUBLISHED";
     private static final String ARTICLE_STATUS_SUBMITTED = "SUBMITTED";
     private static final String ARTICLE_STATUS_FAILED = "FAILED";
     private static final String ARTICLE_STATUS_CANCELLED = "CANCELLED";
+    private static final String ARTICLE_STATUS_REJECTED = "REJECTED";
 
     private static final Set<String> PLATFORMS = Set.of("WECHAT_OFFICIAL", "ZHIHU", "CSDN", "JUEJIN");
     private static final Set<String> PUBLISH_TYPES = Set.of("IMMEDIATE", "SCHEDULED");
@@ -209,6 +212,11 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
                 task.setPublishUrl(result.publishUrl());
                 task.setArticleStatus(resolveSuccessArticleStatus(result));
                 task.setErrorMessage(null);
+            } else if (result.blocked()) {
+                task.setStatus(result.taskStatus());
+                task.setPublishUrl(result.publishUrl());
+                task.setArticleStatus(resolveBlockedArticleStatus(result));
+                task.setErrorMessage(resolveResultMessage(result));
             } else {
                 task.setStatus(STATUS_FAILED);
                 task.setPublishUrl(null);
@@ -336,6 +344,37 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
             return ARTICLE_STATUS_REVIEWING;
         }
         return ARTICLE_STATUS_SUBMITTED;
+    }
+
+    private String resolveBlockedArticleStatus(PublishResult result) {
+        if (STATUS_NEED_MANUAL_CONFIRM.equals(result.taskStatus())) {
+            return ARTICLE_STATUS_SUBMITTED;
+        }
+        if (STATUS_CONTENT_REJECTED.equals(result.taskStatus())) {
+            return ARTICLE_STATUS_REJECTED;
+        }
+        return ARTICLE_STATUS_FAILED;
+    }
+
+    private String resolveResultMessage(PublishResult result) {
+        if (StringUtils.hasText(result.errorMessage())) {
+            return result.errorMessage();
+        }
+        if (StringUtils.hasText(result.message())) {
+            return result.message();
+        }
+        return getDefaultStatusMessage(result.taskStatus());
+    }
+
+    private String getDefaultStatusMessage(String status) {
+        return switch (status) {
+            case "NEED_LOGIN" -> "需要登录后继续发布";
+            case "NEED_CAPTCHA" -> "需要人工完成验证码后继续发布";
+            case STATUS_NEED_MANUAL_CONFIRM -> "已自动填充，请人工确认发布";
+            case "LINK_FETCH_FAILED" -> "发布页面打开失败";
+            case STATUS_CONTENT_REJECTED -> "内容被平台拒绝";
+            default -> "发布执行未完成";
+        };
     }
 
     private void fillTask(

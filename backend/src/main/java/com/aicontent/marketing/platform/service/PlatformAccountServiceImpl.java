@@ -7,6 +7,7 @@ import com.aicontent.marketing.platform.dto.PlatformAccountSaveRequest;
 import com.aicontent.marketing.platform.entity.PlatformAccount;
 import com.aicontent.marketing.platform.mapper.PlatformAccountMapper;
 import com.aicontent.marketing.platform.vo.PlatformAccountVO;
+import com.aicontent.marketing.publish.publisher.browser.BrowserPublisherConfig;
 import com.aicontent.marketing.publish.publisher.wechat.WechatAccessTokenCache;
 import com.aicontent.marketing.publish.publisher.wechat.WechatAuthConfig;
 import com.aicontent.marketing.publish.publisher.wechat.WechatClient;
@@ -34,6 +35,8 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
     private static final Set<String> PLATFORMS = Set.of("WECHAT_OFFICIAL", "ZHIHU", "CSDN", "JUEJIN");
     private static final Set<String> AUTH_TYPES = Set.of("APP_SECRET", "COOKIE", "BROWSER_PROFILE", "API_KEY", "MANUAL");
     private static final Set<String> PUBLISH_MODES = Set.of("OFFICIAL_API", "UNOFFICIAL_API", "BROWSER_AUTOMATION", "MANUAL_CONFIRM");
+    private static final Set<String> BROWSER_PLATFORMS = Set.of("CSDN", "ZHIHU");
+    private static final Set<String> BROWSER_PUBLISH_MODES = Set.of("BROWSER_AUTOMATION", "MANUAL_CONFIRM");
     private static final Set<String> DEFAULT_COVER_EXTENSIONS = Set.of("jpg", "jpeg", "png", "gif", "bmp");
     private static final long DEFAULT_COVER_MAX_SIZE = 2 * 1024 * 1024;
     private static final String AUTH_CONFIG_JSON_ERROR = "认证配置必须是合法 JSON，请检查双引号、逗号和字段格式";
@@ -208,6 +211,19 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
         if ("WECHAT_OFFICIAL".equals(request.getPlatform()) && "OFFICIAL_API".equals(request.getDefaultPublishMode())) {
             WechatAuthConfig.parse(request.getAuthConfig(), objectMapper);
         }
+        if (BROWSER_PLATFORMS.contains(request.getPlatform()) && BROWSER_PUBLISH_MODES.contains(request.getDefaultPublishMode())) {
+            BrowserPublisherConfig.parse(request.getAuthConfig(), objectMapper, defaultBrowserEditorUrl(request.getPlatform()));
+        }
+    }
+
+    private String defaultBrowserEditorUrl(String platform) {
+        if ("CSDN".equals(platform)) {
+            return "https://editor.csdn.net/md/";
+        }
+        if ("ZHIHU".equals(platform)) {
+            return "https://zhuanlan.zhihu.com/write";
+        }
+        return "";
     }
 
     private JsonNode parseAuthConfig(String authConfig) {

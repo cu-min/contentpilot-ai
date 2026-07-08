@@ -30,7 +30,7 @@ public class PublisherRegistry {
             throw new BusinessException("掘金真实 Publisher 未注册，不能回退到 MockPublisher");
         }
         return publishers.stream()
-                .filter(publisher -> matches(publisher.platform(), platform) && matches(publisher.mode(), publishMode))
+                .filter(publisher -> exactMatch(publisher.platform(), platform) && matches(publisher.mode(), publishMode))
                 .findFirst()
                 .or(() -> publishers.stream()
                         .filter(publisher -> publisher == mockPublisher)

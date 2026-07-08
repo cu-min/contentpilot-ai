@@ -77,6 +77,11 @@ export const publishTaskStatusOptions = [
   { label: '执行中', value: 'RUNNING' },
   { label: '执行成功', value: 'SUCCESS' },
   { label: '执行失败', value: 'FAILED' },
+  { label: '需登录', value: 'NEED_LOGIN' },
+  { label: '需验证码', value: 'NEED_CAPTCHA' },
+  { label: '需人工确认', value: 'NEED_MANUAL_CONFIRM' },
+  { label: '取链失败', value: 'LINK_FETCH_FAILED' },
+  { label: '内容未通过', value: 'CONTENT_REJECTED' },
   { label: '已取消', value: 'CANCELLED' },
 ] as const;
 

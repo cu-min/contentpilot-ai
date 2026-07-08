@@ -282,6 +282,12 @@ export default function Publish() {
         message.success(record.platform === 'WECHAT_OFFICIAL' ? '公众号草稿创建成功' : '自动发布成功');
       } else if (result.data.status === 'RUNNING' && result.data.platform === 'WECHAT_OFFICIAL' && result.data.externalPublishId) {
         message.info('已提交微信发布，等待平台确认');
+      } else if (result.data.status === 'NEED_MANUAL_CONFIRM') {
+        message.info(result.data.errorMessage || '已自动填充，请人工确认发布');
+      } else if (result.data.status === 'NEED_LOGIN') {
+        message.warning(result.data.errorMessage || '需要登录后重新执行发布');
+      } else if (result.data.status === 'NEED_CAPTCHA') {
+        message.warning(result.data.errorMessage || '需要人工完成验证码后重新执行发布');
       } else {
         message.error(`自动发布失败：${result.data.errorMessage || getPublishTaskStatusLabel(result.data.status) || '发布失败'}`);
       }
@@ -348,17 +354,19 @@ export default function Publish() {
       'FAILED',
       'NEED_LOGIN',
       'NEED_CAPTCHA',
-      'NEED_MANUAL_CONFIRM',
       'LINK_FETCH_FAILED',
       'CONTENT_REJECTED',
     ] as PublishTaskStatus[]
   ).includes(status);
+
+  const isManualConfirmStatus = (status: PublishTaskStatus) => status === 'NEED_MANUAL_CONFIRM';
 
   const statusColor = (status: PublishTaskStatus) => {
     if (status === 'DRAFT') return 'default';
     if (status === 'PENDING') return 'processing';
     if (status === 'RUNNING') return 'blue';
     if (status === 'SUCCESS') return 'success';
+    if (isManualConfirmStatus(status)) return 'warning';
     if (isFailureStatus(status)) return 'error';
     if (status === 'CANCELLED') return 'warning';
     return 'default';
@@ -385,6 +393,7 @@ export default function Publish() {
     if (record.status === 'CONTENT_REJECTED') return { label: '未通过', color: 'error' };
     if (record.status === 'NEED_LOGIN') return { label: '需登录', color: 'error' };
     if (record.status === 'NEED_CAPTCHA') return { label: '需验证码', color: 'error' };
+    if (record.status === 'NEED_MANUAL_CONFIRM') return { label: '待人工确认', color: 'warning' };
     if (record.status === 'CANCELLED') return { label: '已取消', color: 'default' };
     if (isFailureStatus(record.status)) return { label: '发布失败', color: 'error' };
     return { label: getPublishTaskStatusLabel(record.status), color: statusColor(record.status) };
@@ -413,6 +422,13 @@ export default function Publish() {
     Modal.error({
       title: '失败原因',
       content: record.errorMessage || getPublishTaskStatusLabel(record.status) || '暂无失败原因',
+    });
+  };
+
+  const handleViewManualConfirm = (record: PublishTask) => {
+    Modal.info({
+      title: '人工确认',
+      content: record.errorMessage || '已自动填充，请人工确认发布',
     });
   };
 
@@ -448,6 +464,15 @@ export default function Publish() {
 
     if (record.status === 'SUCCESS') {
       return <Button size="small" onClick={() => handleViewResult(record)}>查看结果</Button>;
+    }
+
+    if (record.status === 'NEED_MANUAL_CONFIRM') {
+      return (
+        <Space size={8} wrap>
+          <Button size="small" onClick={() => handleViewResult(record)}>查看页面</Button>
+          <Button size="small" onClick={() => handleViewManualConfirm(record)}>查看提示</Button>
+        </Space>
+      );
     }
 
     if (isFailureStatus(record.status)) {
@@ -525,6 +550,13 @@ export default function Publish() {
         }
         if (record.status === 'RUNNING' && record.platform === 'WECHAT_OFFICIAL' && record.externalPublishId) {
           return <Typography.Text>微信发布确认中</Typography.Text>;
+        }
+        if (record.status === 'NEED_MANUAL_CONFIRM') {
+          return (
+            <Typography.Text type="warning" ellipsis={{ tooltip: record.errorMessage }}>
+              {record.errorMessage || '已自动填充，请人工确认发布'}
+            </Typography.Text>
+          );
         }
         if (isFailureStatus(record.status)) {
           return (
