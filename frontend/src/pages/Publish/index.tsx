@@ -47,6 +47,8 @@ import {
 } from '../../types/publishTask';
 import { formatFailure, getErrorText } from '../../utils/feedback';
 
+const CSDN_MANAGE_URL = 'https://mp.csdn.net/mp_blog/manage/article';
+
 interface PublishTaskFormValues {
   articleId?: number;
   platformContentId: number;
@@ -402,13 +404,32 @@ export default function Publish() {
     return { label: getPublishTaskStatusLabel(record.status), color: statusColor(record.status) };
   };
 
-  const isOfficialArticleUrl = (url?: string) => Boolean(url && url.includes('/post/'));
+  const isJuejinArticleUrl = (url?: string) => Boolean(url && url.includes('/post/'));
+
+  const isCsdnArticleUrl = (url?: string) => Boolean(
+    url
+    && url.includes('csdn.net')
+    && (url.includes('/article/details/') || url.includes('blog.csdn.net')),
+  );
+
+  const isOfficialArticleUrl = (url?: string) => isJuejinArticleUrl(url) || isCsdnArticleUrl(url);
+
+  const isCsdnManageUrl = (url?: string) => Boolean(url?.includes('mp.csdn.net/mp_blog/manage/article'));
+
+  const isCsdnEditorUrl = (url?: string) => Boolean(url?.includes('editor.csdn.net/md'));
 
   const isWechatDraftUrl = (url?: string) => Boolean(url?.startsWith('wechat-draft:'));
 
   const isWechatPublishUrl = (url?: string) => Boolean(url?.startsWith('wechat-publish:'));
 
   const handleViewResult = (record: PublishTask) => {
+    if (record.platform === 'CSDN') {
+      const url = record.publishUrl && !isCsdnEditorUrl(record.publishUrl)
+        ? record.publishUrl
+        : CSDN_MANAGE_URL;
+      window.open(url || CSDN_MANAGE_URL, '_blank', 'noreferrer');
+      return;
+    }
     const url = record.publishUrl || record.draftUrl;
     if (!url || isWechatDraftUrl(url) || isWechatPublishUrl(url)) {
       if (isWechatPublishUrl(url)) {
@@ -473,16 +494,14 @@ export default function Publish() {
     }
 
     if (record.status === 'SUCCESS') {
-      return <Button size="small" onClick={() => handleViewResult(record)}>查看结果</Button>;
+      return <Button size="small" type={record.platform === 'CSDN' ? 'primary' : 'default'} onClick={() => handleViewResult(record)}>查看文章</Button>;
     }
 
     if (record.status === 'NEED_MANUAL_CONFIRM') {
-      return (
-        <Space size={8} wrap>
-          <Button size="small" onClick={() => handleViewResult(record)}>打开编辑器</Button>
-          <Button size="small" onClick={() => handleViewManualConfirm(record)}>查看提示</Button>
-        </Space>
-      );
+      if (record.platform === 'CSDN') {
+        return <Button size="small" type="primary" onClick={() => handleViewResult(record)}>查看文章</Button>;
+      }
+      return <Button size="small" onClick={() => handleViewManualConfirm(record)}>查看提示</Button>;
     }
 
     if (isFailureStatus(record.status)) {
@@ -549,10 +568,29 @@ export default function Publish() {
       responsive: ['lg'],
       render: (_, record) => {
         if (record.status === 'SUCCESS' && isOfficialArticleUrl(record.publishUrl)) {
+          if (record.platform === 'CSDN') {
+            return (
+              <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+                <Typography.Text type="success">CSDN 发布成功</Typography.Text>
+                <Typography.Link href={record.publishUrl} target="_blank" rel="noreferrer">
+                  查看文章
+                </Typography.Link>
+              </Space>
+            );
+          }
+          return <Typography.Link href={record.publishUrl} target="_blank" rel="noreferrer">查看文章</Typography.Link>;
+        }
+        if (record.status === 'SUCCESS' && record.platform === 'CSDN') {
           return (
-            <Typography.Link href={record.publishUrl} target="_blank" rel="noreferrer">
-              查看文章
-            </Typography.Link>
+            <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+              <Typography.Text type="success">CSDN 发布成功</Typography.Text>
+              {isCsdnManageUrl(record.publishUrl) || !record.publishUrl ? (
+                <Typography.Text type="secondary">未自动获取正式文章链接，请在 CSDN 内容管理页查看。</Typography.Text>
+              ) : null}
+              <Typography.Link href={record.publishUrl || CSDN_MANAGE_URL} target="_blank" rel="noreferrer">
+                查看文章
+              </Typography.Link>
+            </Space>
           );
         }
         if (record.status === 'SUCCESS' && isWechatDraftUrl(record.publishUrl)) {
@@ -565,6 +603,15 @@ export default function Publish() {
           return <Typography.Text type="warning">CSDN 浏览器自动化执行中，请不要操作 Chrome for Testing 窗口。</Typography.Text>;
         }
         if (record.status === 'NEED_MANUAL_CONFIRM') {
+          if (record.platform === 'CSDN') {
+            return (
+              <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+                <Typography.Text type="warning">已自动填充 CSDN 编辑器</Typography.Text>
+                <Typography.Text type="secondary">请切换到 Chrome for Testing 窗口检查内容并手动发布。</Typography.Text>
+                <Typography.Text type="secondary">如未看到按钮，请滚动到底部右下角查看“保存草稿 / 发布文章”。</Typography.Text>
+              </Space>
+            );
+          }
           return (
             <Space direction="vertical" size={2}>
               <Typography.Text type="warning" ellipsis={{ tooltip: record.errorMessage }}>

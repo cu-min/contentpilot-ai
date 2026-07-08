@@ -16,11 +16,17 @@ public record BrowserPublisherConfig(
         String defaultColumn,
         String defaultSummary,
         boolean manualConfirm,
+        boolean autoPublish,
+        String manageUrl,
         boolean headless,
         double timeoutMs
 ) {
 
     public static BrowserPublisherConfig parse(String rawConfig, ObjectMapper objectMapper, String defaultEditorUrl) {
+        return parse(rawConfig, objectMapper, defaultEditorUrl, "");
+    }
+
+    public static BrowserPublisherConfig parse(String rawConfig, ObjectMapper objectMapper, String defaultEditorUrl, String defaultManageUrl) {
         if (!StringUtils.hasText(rawConfig)) {
             throw new BusinessException("浏览器自动化 auth_config 未配置");
         }
@@ -34,6 +40,8 @@ public record BrowserPublisherConfig(
                     text(root, "defaultColumn", ""),
                     text(root, "defaultSummary", ""),
                     bool(root, "manualConfirm", true),
+                    bool(root, "autoPublish", false),
+                    text(root, "manageUrl", defaultManageUrl),
                     bool(root, "headless", false),
                     number(root, "timeoutMs", 30_000)
             );

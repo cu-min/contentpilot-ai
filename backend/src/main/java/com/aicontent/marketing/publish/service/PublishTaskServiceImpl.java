@@ -211,7 +211,7 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
                 task.setStatus(STATUS_SUCCESS);
                 task.setPublishUrl(result.publishUrl());
                 task.setArticleStatus(resolveSuccessArticleStatus(result));
-                task.setErrorMessage(null);
+                task.setErrorMessage(StringUtils.hasText(result.message()) ? result.message() : null);
             } else if (result.blocked()) {
                 task.setStatus(result.taskStatus());
                 task.setPublishUrl(result.publishUrl());
@@ -339,6 +339,9 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     private String resolveSuccessArticleStatus(PublishResult result) {
         if (StringUtils.hasText(result.publishUrl()) && result.publishUrl().startsWith("wechat-draft:")) {
             return ARTICLE_STATUS_SUBMITTED;
+        }
+        if (StringUtils.hasText(result.publishUrl()) && result.publishUrl().contains("csdn.net")) {
+            return ARTICLE_STATUS_PUBLISHED;
         }
         if (StringUtils.hasText(result.articleId()) || StringUtils.hasText(result.publishUrl())) {
             return ARTICLE_STATUS_REVIEWING;

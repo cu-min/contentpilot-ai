@@ -10,6 +10,7 @@ import com.aicontent.marketing.publish.publisher.browser.BrowserAutomationSessio
 import com.aicontent.marketing.publish.publisher.browser.BrowserPublisherConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.options.WaitUntilState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -32,6 +33,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     private static final String MODE_BROWSER_AUTOMATION = "BROWSER_AUTOMATION";
     private static final String MODE_MANUAL_CONFIRM = "MANUAL_CONFIRM";
     private static final String DEFAULT_EDITOR_URL = "https://editor.csdn.net/md/?not_checkout=1";
+    private static final String DEFAULT_MANAGE_URL = "https://mp.csdn.net/mp_blog/manage/article";
     private static final String MANUAL_CONFIRM_MESSAGE = "已自动填充 CSDN 编辑器，请在浏览器中人工确认并发布";
     private static final Logger log = LoggerFactory.getLogger(CsdnBrowserPublisher.class);
     private static final long TITLE_TOTAL_TIMEOUT_MS = 15_000;
@@ -44,6 +46,8 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     private static final int CONTENT_VERIFY_SNAPSHOT_LENGTH = 12_000;
     private static final long OPTIONAL_TOTAL_TIMEOUT_MS = 5_000;
     private static final double OPTIONAL_STRATEGY_TIMEOUT_MS = 800;
+    private static final long PUBLISH_RESULT_TIMEOUT_MS = 45_000;
+    private static final long PUBLISH_CONFIRM_TIMEOUT_MS = 8_000;
     private static final Pattern VERIFY_TEXT_FRAGMENT_PATTERN = Pattern.compile("[\\p{IsHan}A-Za-z0-9]{6,}");
     private static final List<String> TITLE_VALUE_SELECTORS = List.of(
             "input[placeholder*='请输入文章标题']",
@@ -111,6 +115,34 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             "button:has-text('取消')",
             "[aria-label='关闭']"
     );
+    private static final List<String> PUBLISH_BUTTON_SELECTORS = List.of(
+            "button:has-text('发布文章')",
+            "text=发布文章",
+            "button:has-text('立即发布')",
+            "text=立即发布",
+            "button:has-text('发布')"
+    );
+    private static final List<String> FINAL_CONFIRM_SELECTORS = List.of(
+            "button:has-text('确认发布')",
+            "button:has-text('提交发布')",
+            "button:has-text('立即发布')",
+            "button:has-text('发布文章')",
+            "button:has-text('发布')"
+    );
+    private static final List<String> PUBLISH_SUMMARY_SELECTORS = List.of(
+            "textarea[placeholder*='简介']",
+            "textarea[placeholder*='摘要']",
+            "textarea[placeholder*='描述']",
+            "textarea[placeholder*='请输入简介']",
+            "textarea[placeholder*='请输入摘要']",
+            "textarea[placeholder*='文章简介']",
+            "input[placeholder*='简介']",
+            "input[placeholder*='摘要']",
+            "input[aria-label*='简介']",
+            "input[aria-label*='摘要']",
+            "[aria-label*='简介']",
+            "[aria-label*='摘要']"
+    );
 
     private final BrowserAutomationService browserAutomationService;
     private final ObjectMapper objectMapper;
@@ -144,7 +176,8 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             BrowserPublisherConfig config = BrowserPublisherConfig.parse(
                     context.accountAuthConfig(),
                     objectMapper,
-                    DEFAULT_EDITOR_URL
+                    DEFAULT_EDITOR_URL,
+                    DEFAULT_MANAGE_URL
             );
             BrowserAutomationSession session = browserAutomationService.openSession(new BrowserAutomationRequest(
                     sessionKey(context),
@@ -203,6 +236,12 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                 return manualConfirmResult(context, page, config);
             }
             fillOptionalMetadata(page, context, config);
+            if (config.autoPublish()) {
+                PublishResult result = autoPublish(context, page, config);
+                log.info("CSDN publish task result status = {}", result.taskStatus());
+                return result;
+            }
+            log.info("CSDN auto publish disabled: taskId={}", context.taskId());
             return manualConfirmResult(context, page, config);
         } catch (BusinessException exception) {
             return PublishResult.failed(exception.getMessage());
@@ -224,6 +263,182 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         log.info("CSDN manual confirm result returned: taskId={}, url={}", context.taskId(), url);
         log.info("CSDN publish task result status = NEED_MANUAL_CONFIRM");
         return result;
+    }
+
+    private PublishResult autoPublish(PublishContext context, Page page, BrowserPublisherConfig config) {
+        long startedAt = System.currentTimeMillis();
+        log.info("CSDN publish click started: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
+        if (isLoginPage(page) || browserAutomationService.looksLoggedOut(page)) {
+            log.warn("CSDN publish result login: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
+            return PublishResult.needLogin(currentOrConfiguredUrl(page, config), "CSDN 登录态失效，请在打开的浏览器中完成登录后重新执行发布任务");
+        }
+        if (browserAutomationService.looksCaptchaBlocked(page)) {
+            log.warn("CSDN publish result captcha: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
+            return PublishResult.needCaptcha(currentOrConfiguredUrl(page, config), "CSDN 页面需要人工完成验证码或安全验证后重新执行发布任务");
+        }
+        if (!isMarkdownEditorPage(page)) {
+            log.warn("CSDN publish result failed: taskId={}, reason=not-editor, currentUrl={}", context.taskId(), safeUrl(page));
+            return PublishResult.failed("CSDN 发布失败：当前页面不是 Markdown 编辑器");
+        }
+        if (!clickPublishButton(page)) {
+            log.warn("CSDN publish result failed: taskId={}, reason=button-not-found, durationMs={}", context.taskId(), elapsed(startedAt));
+            return PublishResult.failed("CSDN 发布失败：未找到“发布文章”按钮");
+        }
+        handlePublishConfirmations(page, context, config);
+        log.info("CSDN publish result check started: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
+        PublishResult result = waitForPublishResult(page, context, config, startedAt);
+        logPublishResult(context, result);
+        return result;
+    }
+
+    private boolean clickPublishButton(Page page) {
+        scrollToBottom(page);
+        boolean visible = browserAutomationService.anyVisibleInPageOrFrames(page, PUBLISH_BUTTON_SELECTORS);
+        if (visible) {
+            log.info("CSDN publish button found: currentUrl={}", safeUrl(page));
+        }
+        boolean clicked = browserAutomationService.clickFirstInPageOrFrames(page, PUBLISH_BUTTON_SELECTORS, 2_000);
+        if (clicked) {
+            log.info("CSDN publish button clicked: currentUrl={}", safeUrl(page));
+            return true;
+        }
+        scrollToBottom(page);
+        clicked = browserAutomationService.clickFirstInPageOrFrames(page, PUBLISH_BUTTON_SELECTORS, 2_000);
+        if (clicked) {
+            log.info("CSDN publish button found: currentUrl={}", safeUrl(page));
+            log.info("CSDN publish button clicked: currentUrl={}", safeUrl(page));
+        }
+        return clicked;
+    }
+
+    private void handlePublishConfirmations(Page page, PublishContext context, BrowserPublisherConfig config) {
+        long deadline = System.currentTimeMillis() + PUBLISH_CONFIRM_TIMEOUT_MS;
+        while (System.currentTimeMillis() < deadline) {
+            if (isLoginPage(page) || browserAutomationService.looksCaptchaBlocked(page)) {
+                return;
+            }
+            fillOptionalMetadata(page, context, config);
+            fillPublishDialogRequiredFields(page, context, config);
+            if (browserAutomationService.clickFirstInPageOrFrames(page, FINAL_CONFIRM_SELECTORS, 1_000)) {
+                log.info("CSDN publish button clicked: stage=final-confirm, currentUrl={}", safeUrl(page));
+                sleep(1_000);
+                continue;
+            }
+            sleep(500);
+        }
+    }
+
+    private void fillPublishDialogRequiredFields(Page page, PublishContext context, BrowserPublisherConfig config) {
+        long startedAt = System.currentTimeMillis();
+        String summary = resolvePublishSummary(context, config);
+        boolean summaryFilled = false;
+        if (StringUtils.hasText(summary)) {
+            summaryFilled = browserAutomationService.fillFirstInPageOrFramesWithin(
+                    page,
+                    PUBLISH_SUMMARY_SELECTORS,
+                    summary,
+                    OPTIONAL_STRATEGY_TIMEOUT_MS,
+                    System.currentTimeMillis() + 1_500
+            );
+        }
+        boolean originalChecked = checkOriginalStatement(page);
+        log.info("CSDN publish dialog required fields handled: summaryFilled={}, originalChecked={}, summaryLength={}, durationMs={}",
+                summaryFilled, originalChecked, summary.length(), elapsed(startedAt));
+    }
+
+    private PublishResult waitForPublishResult(Page page, PublishContext context, BrowserPublisherConfig config, long startedAt) {
+        long deadline = System.currentTimeMillis() + PUBLISH_RESULT_TIMEOUT_MS;
+        boolean triedManagePage = false;
+        while (System.currentTimeMillis() < deadline) {
+            if (isLoginPage(page) || browserAutomationService.looksLoggedOut(page)) {
+                log.warn("CSDN publish result login: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
+                return PublishResult.needLogin(currentOrConfiguredUrl(page, config), "CSDN 登录态失效，请在打开的浏览器中完成登录后重新执行发布任务");
+            }
+            if (browserAutomationService.looksCaptchaBlocked(page)) {
+                log.warn("CSDN publish result captcha: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
+                return PublishResult.needCaptcha(currentOrConfiguredUrl(page, config), "CSDN 页面需要人工完成验证码或安全验证后重新执行发布任务");
+            }
+            String currentUrl = safeUrl(page);
+            String snapshot = pageSnapshot(page);
+            if (looksContentRejected(snapshot)) {
+                log.warn("CSDN publish result rejected: taskId={}, durationMs={}, currentUrl={}",
+                        context.taskId(), elapsed(startedAt), currentUrl);
+                return PublishResult.contentRejected(currentUrl, "CSDN 内容未通过审核或触发平台规则，请在 CSDN 内容管理页查看详情");
+            }
+            String articleUrl = extractArticleUrl(page, context.title());
+            if (isCsdnArticleUrl(articleUrl)) {
+                log.info("CSDN publish result success: taskId={}, durationMs={}, publishUrl={}",
+                        context.taskId(), elapsed(startedAt), articleUrl);
+                return PublishResult.success(articleUrl, "CSDN 发布成功");
+            }
+            if (isCsdnArticleUrl(currentUrl)) {
+                log.info("CSDN publish result success: taskId={}, durationMs={}, publishUrl={}",
+                        context.taskId(), elapsed(startedAt), currentUrl);
+                return PublishResult.success(currentUrl, "CSDN 发布成功");
+            }
+            if (looksReviewing(snapshot)) {
+                String publishUrl = StringUtils.hasText(articleUrl) ? articleUrl : fallbackManageUrl(config);
+                log.info("CSDN publish result success: taskId={}, state=reviewing, durationMs={}, publishUrl={}",
+                        context.taskId(), elapsed(startedAt), publishUrl);
+                return PublishResult.success(publishUrl, "已提交 CSDN，当前审核中");
+            }
+            if (looksPublishSucceeded(snapshot)) {
+                String publishUrl = StringUtils.hasText(articleUrl) ? articleUrl : fallbackManageUrl(config);
+                String message = isCsdnArticleUrl(publishUrl)
+                        ? "CSDN 发布成功"
+                        : "CSDN 发布成功，但未自动获取正式文章链接，请在内容管理页查看";
+                log.info("CSDN publish result success: taskId={}, durationMs={}, publishUrl={}",
+                        context.taskId(), elapsed(startedAt), publishUrl);
+                return PublishResult.success(publishUrl, message);
+            }
+            String missing = missingRequiredField(snapshot);
+            if (StringUtils.hasText(missing)) {
+                log.warn("CSDN publish result failed: taskId={}, reason={}, durationMs={}",
+                        context.taskId(), missing, elapsed(startedAt));
+                return PublishResult.failed("CSDN 发布失败：" + missing);
+            }
+            if (!triedManagePage && elapsed(startedAt) > 8_000) {
+                triedManagePage = true;
+                navigateToManagePage(page, config);
+            }
+            if (triedManagePage && snapshotContainsTitle(snapshot, context.title())) {
+                String publishUrl = isCsdnArticleUrl(articleUrl) ? articleUrl : fallbackManageUrl(config);
+                String message = isCsdnArticleUrl(publishUrl)
+                        ? "CSDN 发布成功"
+                        : "CSDN 发布成功，但未自动获取正式文章链接，请在内容管理页查看";
+                log.info("CSDN publish result success: taskId={}, stage=manage-title-match, durationMs={}, publishUrl={}",
+                        context.taskId(), elapsed(startedAt), publishUrl);
+                return PublishResult.success(publishUrl, message);
+            }
+            sleep(1_000);
+        }
+        log.warn("CSDN publish result link fetch failed: taskId={}, durationMs={}, currentUrl={}",
+                context.taskId(), elapsed(startedAt), safeUrl(page));
+        return PublishResult.linkFetchFailed(fallbackManageUrl(config), "CSDN 发布后未能确认结果，请在 CSDN 内容管理页检查");
+    }
+
+    private void logPublishResult(PublishContext context, PublishResult result) {
+        if (result.success()) {
+            log.info("CSDN publish result success: taskId={}, resultStatus={}", context.taskId(), result.taskStatus());
+            return;
+        }
+        if ("NEED_CAPTCHA".equals(result.taskStatus())) {
+            log.warn("CSDN publish result captcha: taskId={}, resultStatus={}", context.taskId(), result.taskStatus());
+            return;
+        }
+        if ("NEED_LOGIN".equals(result.taskStatus())) {
+            log.warn("CSDN publish result login: taskId={}, resultStatus={}", context.taskId(), result.taskStatus());
+            return;
+        }
+        if ("CONTENT_REJECTED".equals(result.taskStatus())) {
+            log.warn("CSDN publish result rejected: taskId={}, resultStatus={}", context.taskId(), result.taskStatus());
+            return;
+        }
+        if ("LINK_FETCH_FAILED".equals(result.taskStatus())) {
+            log.warn("CSDN publish result link fetch failed: taskId={}, resultStatus={}", context.taskId(), result.taskStatus());
+            return;
+        }
+        log.warn("CSDN publish result failed: taskId={}, resultStatus={}", context.taskId(), result.taskStatus());
     }
 
     private void validateContext(PublishContext context) {
@@ -590,8 +805,201 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                 safeUrl(page), editorType, summaries.size(), summaries);
     }
 
+    private String resolvePublishSummary(PublishContext context, BrowserPublisherConfig config) {
+        if (StringUtils.hasText(config.defaultSummary())) {
+            return trimToLength(config.defaultSummary(), 180);
+        }
+        if (StringUtils.hasText(context.summary())) {
+            return trimToLength(context.summary(), 180);
+        }
+        return trimToLength(stripMarkdown(context.content()), 180);
+    }
+
+    private boolean checkOriginalStatement(Page page) {
+        try {
+            Object checked = page.evaluate("""
+                    () => {
+                      const textOf = element => (element?.innerText || element?.textContent || '').replace(/\\s+/g, ' ').trim();
+                      const isOriginalText = text => text && (text.includes('原创声明') || text.includes('原创'));
+                      const setChecked = input => {
+                        if (!input) return false;
+                        if (input.checked) return true;
+                        input.click();
+                        if (!input.checked) {
+                          input.checked = true;
+                          input.dispatchEvent(new Event('input', { bubbles: true }));
+                          input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                        return input.checked === true;
+                      };
+                      const inputs = Array.from(document.querySelectorAll("input[type='checkbox']"));
+                      for (const input of inputs) {
+                        const id = input.id;
+                        const label = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
+                        const container = input.closest('label, li, div, section');
+                        const text = [textOf(label), textOf(container), input.getAttribute('aria-label') || ''].join(' ');
+                        if (isOriginalText(text) && setChecked(input)) return true;
+                      }
+                      const candidates = Array.from(document.querySelectorAll('label, span, div, p'))
+                        .filter(element => isOriginalText(textOf(element)));
+                      for (const element of candidates) {
+                        const container = element.closest('label, li, div, section') || element;
+                        const input = container.querySelector("input[type='checkbox']");
+                        if (setChecked(input)) return true;
+                        try {
+                          element.click();
+                          const afterClickInput = container.querySelector("input[type='checkbox']");
+                          if (!afterClickInput || afterClickInput.checked) return true;
+                        } catch (e) {
+                        }
+                      }
+                      return false;
+                    }
+                    """);
+            return Boolean.TRUE.equals(checked);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private String pageSnapshot(Page page) {
+        return browserAutomationService.textSnapshot(page, List.of(
+                "body",
+                "a",
+                "button",
+                "[role='dialog']",
+                ".modal",
+                ".ant-modal",
+                "[class*='dialog']",
+                "[class*='modal']",
+                "[class*='toast']",
+                "[class*='message']"
+        ), CONTENT_VERIFY_SNAPSHOT_LENGTH);
+    }
+
+    private boolean looksPublishSucceeded(String snapshot) {
+        return containsAnyText(snapshot, List.of("发布成功", "已发布", "文章已发布", "提交成功", "内容管理"));
+    }
+
+    private boolean looksReviewing(String snapshot) {
+        return containsAnyText(snapshot, List.of("审核中", "等待审核", "已提交审核", "提交审核"));
+    }
+
+    private boolean looksContentRejected(String snapshot) {
+        return containsAnyText(snapshot, List.of("未通过", "内容违规", "审核失败", "审核未通过", "发布失败", "风控", "风险提示"));
+    }
+
+    private String missingRequiredField(String snapshot) {
+        if (!StringUtils.hasText(snapshot)) {
+            return "";
+        }
+        if (snapshot.contains("缺少分类") || snapshot.contains("请选择分类") || snapshot.contains("分类必填")) {
+            return "缺少分类";
+        }
+        if (snapshot.contains("缺少标签") || snapshot.contains("请选择标签") || snapshot.contains("标签必填")) {
+            return "缺少标签";
+        }
+        if (snapshot.contains("摘要必填") || snapshot.contains("请输入摘要") || snapshot.contains("缺少摘要")) {
+            return "摘要必填";
+        }
+        if (snapshot.contains("必填") || snapshot.contains("不能为空") || snapshot.contains("请选择")) {
+            return "存在必填项未填写";
+        }
+        return "";
+    }
+
+    private boolean containsAnyText(String snapshot, List<String> needles) {
+        if (!StringUtils.hasText(snapshot)) {
+            return false;
+        }
+        return needles.stream().anyMatch(snapshot::contains);
+    }
+
+    private boolean snapshotContainsTitle(String snapshot, String title) {
+        if (!StringUtils.hasText(title)) {
+            return false;
+        }
+        return snapshotContainsContent(snapshot, title);
+    }
+
+    private String extractArticleUrl(Page page, String title) {
+        try {
+            Object value = page.evaluate("""
+                    title => {
+                      const normalize = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const titleText = normalize(title);
+                      const links = Array.from(document.querySelectorAll('a[href]'));
+                      const candidates = links
+                        .map(link => ({
+                          href: link.href || '',
+                          text: normalize(link.innerText || link.textContent || '')
+                        }))
+                        .filter(item => item.href.includes('csdn.net') && (
+                          item.href.includes('/article/details/')
+                          || item.href.includes('blog.csdn.net')
+                        ));
+                      const exact = candidates.find(item => titleText && item.text.includes(titleText));
+                      return (exact || candidates[0] || {}).href || '';
+                    }
+                    """, title);
+            return value instanceof String text ? text : "";
+        } catch (RuntimeException ignored) {
+            return "";
+        }
+    }
+
+    private boolean isCsdnArticleUrl(String url) {
+        return StringUtils.hasText(url)
+                && url.contains("csdn.net")
+                && (url.contains("/article/details/") || url.contains("blog.csdn.net"));
+    }
+
+    private void navigateToManagePage(Page page, BrowserPublisherConfig config) {
+        try {
+            page.navigate(fallbackManageUrl(config), new Page.NavigateOptions()
+                    .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
+                    .setTimeout(10_000));
+        } catch (RuntimeException ignored) {
+            // Result detection will continue with the current page.
+        }
+    }
+
+    private String fallbackManageUrl(BrowserPublisherConfig config) {
+        return StringUtils.hasText(config.manageUrl()) ? config.manageUrl() : DEFAULT_MANAGE_URL;
+    }
+
+    private void scrollToBottom(Page page) {
+        try {
+            page.evaluate("() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' })");
+        } catch (RuntimeException ignored) {
+            // Best effort only.
+        }
+    }
+
     private String normalize(String value, String defaultValue) {
         return StringUtils.hasText(value) ? value : defaultValue;
+    }
+
+    private String stripMarkdown(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value
+                .replaceAll("```[\\s\\S]*?```", " ")
+                .replaceAll("`([^`]*)`", "$1")
+                .replaceAll("!\\[[^]]*]\\([^)]*\\)", " ")
+                .replaceAll("\\[[^]]*]\\([^)]*\\)", " ")
+                .replaceAll("[#>*_~`\\-]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private String trimToLength(String value, int maxLength) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String normalized = value.replaceAll("\\s+", " ").trim();
+        return normalized.length() > maxLength ? normalized.substring(0, maxLength) : normalized;
     }
 
     private FillOutcome titleSuccess(String strategy, long startedAt) {
