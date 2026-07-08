@@ -283,7 +283,7 @@ export default function Publish() {
       } else if (result.data.status === 'RUNNING' && result.data.platform === 'WECHAT_OFFICIAL' && result.data.externalPublishId) {
         message.info('已提交微信发布，等待平台确认');
       } else if (result.data.status === 'NEED_MANUAL_CONFIRM') {
-        message.info(result.data.errorMessage || '已自动填充，请人工确认发布');
+        message.info(result.data.errorMessage || '已自动填充，请到浏览器中确认发布');
       } else if (result.data.status === 'NEED_LOGIN') {
         message.warning(result.data.errorMessage || '需要登录后重新执行发布');
       } else if (result.data.status === 'NEED_CAPTCHA') {
@@ -428,7 +428,7 @@ export default function Publish() {
   const handleViewManualConfirm = (record: PublishTask) => {
     Modal.info({
       title: '人工确认',
-      content: record.errorMessage || '已自动填充，请人工确认发布',
+      content: record.errorMessage || '已自动填充，请到浏览器中确认发布',
     });
   };
 
@@ -469,7 +469,7 @@ export default function Publish() {
     if (record.status === 'NEED_MANUAL_CONFIRM') {
       return (
         <Space size={8} wrap>
-          <Button size="small" onClick={() => handleViewResult(record)}>查看页面</Button>
+          <Button size="small" onClick={() => handleViewResult(record)}>打开编辑器</Button>
           <Button size="small" onClick={() => handleViewManualConfirm(record)}>查看提示</Button>
         </Space>
       );
@@ -553,9 +553,16 @@ export default function Publish() {
         }
         if (record.status === 'NEED_MANUAL_CONFIRM') {
           return (
-            <Typography.Text type="warning" ellipsis={{ tooltip: record.errorMessage }}>
-              {record.errorMessage || '已自动填充，请人工确认发布'}
-            </Typography.Text>
+            <Space direction="vertical" size={2}>
+              <Typography.Text type="warning" ellipsis={{ tooltip: record.errorMessage }}>
+                {record.errorMessage || '已自动填充，请到浏览器中确认发布'}
+              </Typography.Text>
+              {record.publishUrl ? (
+                <Typography.Link href={record.publishUrl} target="_blank" rel="noreferrer">
+                  打开编辑器
+                </Typography.Link>
+              ) : null}
+            </Space>
           );
         }
         if (isFailureStatus(record.status)) {

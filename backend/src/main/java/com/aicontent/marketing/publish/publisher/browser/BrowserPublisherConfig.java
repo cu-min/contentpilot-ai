@@ -13,6 +13,9 @@ public record BrowserPublisherConfig(
         String editorUrl,
         List<String> defaultTags,
         String defaultCategory,
+        String defaultColumn,
+        String defaultSummary,
+        boolean manualConfirm,
         boolean headless,
         double timeoutMs
 ) {
@@ -28,6 +31,9 @@ public record BrowserPublisherConfig(
                     text(root, "editorUrl", defaultEditorUrl),
                     stringList(root.path("defaultTags")),
                     text(root, "defaultCategory", ""),
+                    text(root, "defaultColumn", ""),
+                    text(root, "defaultSummary", ""),
+                    bool(root, "manualConfirm", true),
                     bool(root, "headless", false),
                     number(root, "timeoutMs", 30_000)
             );

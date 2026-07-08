@@ -2,6 +2,7 @@ package com.aicontent.marketing.publish.publisher.browser;
 
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Frame;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
@@ -68,9 +69,19 @@ public class BrowserAutomationService {
         return firstVisible(page, List.of(
                 "text=验证码",
                 "text=安全验证",
+                "text=滑块",
+                "text=拖动滑块",
+                "text=人机验证",
+                "text=真人验证",
+                "text=风险验证",
                 "iframe[src*='captcha']",
+                "iframe[src*='verify']",
                 "[class*='captcha']",
-                "[id*='captcha']"
+                "[id*='captcha']",
+                "[class*='verify']",
+                "[id*='verify']",
+                "[class*='slider']",
+                "[id*='slider']"
         ), 800);
     }
 
@@ -80,6 +91,21 @@ public class BrowserAutomationService {
         }
         for (String selector : selectors) {
             if (tryFill(page, selector, value, timeoutMs)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean fillFirstInPageOrFrames(Page page, List<String> selectors, String value, double timeoutMs) {
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        if (fillFirst(page, selectors, value, timeoutMs)) {
+            return true;
+        }
+        for (Frame frame : page.frames()) {
+            if (tryFillFirst(frame, selectors, value, timeoutMs)) {
                 return true;
             }
         }
@@ -98,23 +124,48 @@ public class BrowserAutomationService {
         return false;
     }
 
+    public boolean clickAndInsertFirstInPageOrFrames(Page page, List<String> selectors, String value, double timeoutMs) {
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        if (clickAndTypeFirst(page, selectors, value, timeoutMs)) {
+            return true;
+        }
+        for (Frame frame : page.frames()) {
+            if (tryClickAndInsert(frame, selectors, value, timeoutMs)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean pasteFirstInPageOrFrames(Page page, List<String> selectors, String value, double timeoutMs) {
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        if (tryPaste(page, selectors, value, timeoutMs)) {
+            return true;
+        }
+        for (Frame frame : page.frames()) {
+            if (tryPaste(frame, selectors, value, timeoutMs)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public boolean fillTagLikeInputs(Page page, List<String> values, List<String> selectors, double timeoutMs) {
         if (values == null || values.isEmpty()) {
             return true;
         }
         for (String selector : selectors) {
-            Locator locator = page.locator(selector).first();
-            try {
-                locator.click(new Locator.ClickOptions().setTimeout(timeoutMs));
-                for (String value : values) {
-                    if (StringUtils.hasText(value)) {
-                        page.keyboard().insertText(value);
-                        page.keyboard().press("Enter");
-                    }
-                }
+            if (tryFillTagLike(page, selector, values, timeoutMs)) {
                 return true;
-            } catch (RuntimeException ignored) {
-                // Try the next selector. Selectors are intentionally best-effort across editor versions.
+            }
+            for (Frame frame : page.frames()) {
+                if (tryFillTagLike(frame, selector, values, timeoutMs)) {
+                    return true;
+                }
             }
         }
         return false;
@@ -153,6 +204,18 @@ public class BrowserAutomationService {
         }
     }
 
+    private boolean tryFillFirst(Frame frame, List<String> selectors, String value, double timeoutMs) {
+        for (String selector : selectors) {
+            try {
+                frame.locator(selector).first().fill(value, new Locator.FillOptions().setTimeout(timeoutMs));
+                return true;
+            } catch (RuntimeException ignored) {
+                // Try the next selector/frame.
+            }
+        }
+        return false;
+    }
+
     private boolean tryClickAndType(Page page, String selector, String value, double timeoutMs) {
         try {
             page.locator(selector).first().click(new Locator.ClickOptions().setTimeout(timeoutMs));
@@ -162,6 +225,81 @@ public class BrowserAutomationService {
         } catch (RuntimeException ignored) {
             return false;
         }
+    }
+
+    private boolean tryClickAndInsert(Frame frame, List<String> selectors, String value, double timeoutMs) {
+        for (String selector : selectors) {
+            try {
+                frame.locator(selector).first().click(new Locator.ClickOptions().setTimeout(timeoutMs));
+                frame.page().keyboard().press(selectAllShortcut());
+                frame.page().keyboard().insertText(value);
+                return true;
+            } catch (RuntimeException ignored) {
+                // Try the next selector/frame.
+            }
+        }
+        return false;
+    }
+
+    private boolean tryPaste(Page page, List<String> selectors, String value, double timeoutMs) {
+        for (String selector : selectors) {
+            try {
+                page.locator(selector).first().click(new Locator.ClickOptions().setTimeout(timeoutMs));
+                writeClipboard(page, value);
+                page.keyboard().press(pasteShortcut());
+                return true;
+            } catch (RuntimeException ignored) {
+                // Clipboard access may be unavailable; try the next selector.
+            }
+        }
+        return false;
+    }
+
+    private boolean tryPaste(Frame frame, List<String> selectors, String value, double timeoutMs) {
+        for (String selector : selectors) {
+            try {
+                frame.locator(selector).first().click(new Locator.ClickOptions().setTimeout(timeoutMs));
+                writeClipboard(frame.page(), value);
+                frame.page().keyboard().press(pasteShortcut());
+                return true;
+            } catch (RuntimeException ignored) {
+                // Clipboard access may be unavailable; try the next selector/frame.
+            }
+        }
+        return false;
+    }
+
+    private boolean tryFillTagLike(Page page, String selector, List<String> values, double timeoutMs) {
+        try {
+            page.locator(selector).first().click(new Locator.ClickOptions().setTimeout(timeoutMs));
+            insertTagValues(page, values);
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean tryFillTagLike(Frame frame, String selector, List<String> values, double timeoutMs) {
+        try {
+            frame.locator(selector).first().click(new Locator.ClickOptions().setTimeout(timeoutMs));
+            insertTagValues(frame.page(), values);
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private void insertTagValues(Page page, List<String> values) {
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                page.keyboard().insertText(value);
+                page.keyboard().press("Enter");
+            }
+        }
+    }
+
+    private void writeClipboard(Page page, String value) {
+        page.evaluate("text => navigator.clipboard.writeText(text)", value);
     }
 
     private boolean firstVisible(Page page, List<String> selectors, double timeoutMs) {
@@ -189,6 +327,11 @@ public class BrowserAutomationService {
     private String selectAllShortcut() {
         String osName = System.getProperty("os.name", "").toLowerCase();
         return osName.contains("mac") ? "Meta+A" : "Control+A";
+    }
+
+    private String pasteShortcut() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        return osName.contains("mac") ? "Meta+V" : "Control+V";
     }
 
     private void closeQuietly(BrowserAutomationSession session) {

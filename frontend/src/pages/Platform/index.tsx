@@ -319,7 +319,7 @@ export default function Platform() {
           <Form.Item
             label="认证配置"
             name="authConfig"
-            extra={editing ? '编辑时留空表示保留原认证配置。微信公众号需要 appId、appSecret、defaultThumbMediaId；掘金需要 cookie、defaultCategoryId、defaultTagIds。敏感信息不要提交到代码仓库。' : '建议使用 JSON 字符串保存本地测试配置。微信公众号需要 appId、appSecret、defaultThumbMediaId；掘金需要 cookie、defaultCategoryId、defaultTagIds。'}
+            extra={editing ? '编辑时留空表示保留原认证配置。微信公众号需要 appId、appSecret、defaultThumbMediaId；掘金需要 cookie、defaultCategoryId、defaultTagIds；CSDN 浏览器自动化需要 browserUserDataDir。敏感信息不要提交到代码仓库。' : '建议使用 JSON 字符串保存本地测试配置。CSDN 示例：{"browserUserDataDir":"本机浏览器登录态目录","editorUrl":"https://editor.csdn.net/md/","defaultTags":["Java","Spring Boot","AI"],"defaultCategory":"后端","defaultColumn":"","defaultSummary":"","manualConfirm":true}'}
           >
             <TextArea
               rows={5}

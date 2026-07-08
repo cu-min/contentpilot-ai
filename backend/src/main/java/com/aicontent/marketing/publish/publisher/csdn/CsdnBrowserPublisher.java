@@ -22,6 +22,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     private static final String MODE_BROWSER_AUTOMATION = "BROWSER_AUTOMATION";
     private static final String MODE_MANUAL_CONFIRM = "MANUAL_CONFIRM";
     private static final String DEFAULT_EDITOR_URL = "https://editor.csdn.net/md/";
+    private static final String MANUAL_CONFIRM_MESSAGE = "已自动填充 CSDN 编辑器，请在浏览器中人工确认并发布。";
 
     private final BrowserAutomationService browserAutomationService;
     private final ObjectMapper objectMapper;
@@ -59,23 +60,23 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             ));
             Page page = session.page();
             if (browserAutomationService.looksCaptchaBlocked(page)) {
-                return PublishResult.needCaptcha(config.editorUrl(), "CSDN 页面需要人工完成验证码后重新执行发布任务");
+                return PublishResult.needCaptcha(config.editorUrl(), "CSDN 页面需要人工完成验证码或安全验证后重新执行发布任务");
             }
             if (browserAutomationService.looksLoggedOut(page)) {
                 return PublishResult.needLogin(config.editorUrl(), "CSDN 未检测到登录态，请在打开的浏览器中完成登录后重新执行发布任务");
             }
 
             if (!fillTitle(page, context.title(), config.timeoutMs())) {
-                return PublishResult.linkFetchFailed(config.editorUrl(), "CSDN 编辑器标题输入框未找到，请人工检查页面结构");
+                return PublishResult.failed("CSDN 编辑器标题输入框未找到，自动填充失败，请人工检查页面结构");
             }
             if (!fillContent(page, context.content(), config.timeoutMs())) {
-                return PublishResult.linkFetchFailed(config.editorUrl(), "CSDN 编辑器正文区域未找到，请人工检查页面结构");
+                return PublishResult.failed("CSDN 编辑器正文区域未找到或不可写，自动填充失败，请人工检查页面结构");
             }
-            fillOptionalMetadata(page, config);
+            fillOptionalMetadata(page, context, config);
             return PublishResult.needManualConfirm(
                     config.editorUrl(),
                     config.editorUrl(),
-                    "已自动填充，请人工确认发布"
+                    MANUAL_CONFIRM_MESSAGE
             );
         } catch (BusinessException exception) {
             return PublishResult.failed(exception.getMessage());
@@ -100,45 +101,77 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     }
 
     private boolean fillTitle(Page page, String title, double timeoutMs) {
-        return browserAutomationService.fillFirst(page, List.of(
+        return browserAutomationService.fillFirstInPageOrFrames(page, List.of(
                 "input[placeholder*='请输入文章标题']",
                 "textarea[placeholder*='请输入文章标题']",
                 "input[placeholder*='标题']",
                 "textarea[placeholder*='标题']",
                 "input[name='title']",
+                "[aria-label*='标题']",
                 "#txtTitle"
         ), normalize(title, "未命名 CSDN 草稿"), timeoutMs);
     }
 
     private boolean fillContent(Page page, String content, double timeoutMs) {
         String normalizedContent = normalize(content, "");
-        if (browserAutomationService.fillFirst(page, List.of(
+        List<String> fillSelectors = List.of(
                 "textarea[placeholder*='正文']",
+                "textarea[placeholder*='开始创作']",
+                "textarea[placeholder*='请输入正文']",
                 "textarea.markdown-editor",
+                "textarea#md-editor",
                 ".bytemd-editor textarea",
                 ".editor textarea"
-        ), normalizedContent, timeoutMs)) {
+        );
+        if (browserAutomationService.fillFirstInPageOrFrames(page, fillSelectors, normalizedContent, timeoutMs)) {
             return true;
         }
-        return browserAutomationService.clickAndTypeFirst(page, List.of(
+        List<String> editorSelectors = List.of(
+                "[role='textbox']",
                 ".cm-content",
                 ".CodeMirror-code",
                 "[contenteditable='true']",
                 ".monaco-editor textarea"
-        ), normalizedContent, timeoutMs);
+        );
+        if (browserAutomationService.clickAndInsertFirstInPageOrFrames(page, editorSelectors, normalizedContent, timeoutMs)) {
+            return true;
+        }
+        return browserAutomationService.pasteFirstInPageOrFrames(page, editorSelectors, normalizedContent, timeoutMs);
     }
 
-    private void fillOptionalMetadata(Page page, BrowserPublisherConfig config) {
+    private void fillOptionalMetadata(Page page, PublishContext context, BrowserPublisherConfig config) {
         browserAutomationService.fillTagLikeInputs(page, config.defaultTags(), List.of(
+                "input[placeholder*='文章标签']",
                 "input[placeholder*='标签']",
-                ".tag-input input",
-                "[class*='tag'] input"
+                "input[aria-label*='标签']"
         ), 1_500);
+        String summary = StringUtils.hasText(config.defaultSummary())
+                ? config.defaultSummary()
+                : normalize(context.summary(), "");
+        if (StringUtils.hasText(summary)) {
+            browserAutomationService.fillFirstInPageOrFrames(page, List.of(
+                    "textarea[placeholder*='摘要']",
+                    "textarea[placeholder*='简介']",
+                    "textarea[placeholder*='描述']",
+                    "input[placeholder*='摘要']",
+                    "[aria-label*='摘要']"
+            ), summary, 1_500);
+        }
         if (StringUtils.hasText(config.defaultCategory())) {
-            browserAutomationService.fillFirst(page, List.of(
+            browserAutomationService.fillFirstInPageOrFrames(page, List.of(
+                    "input[placeholder*='文章分类']",
                     "input[placeholder*='分类']",
-                    "[class*='category'] input"
+                    "input[aria-label*='分类']",
+                    "[role='combobox'][aria-label*='分类']"
             ), config.defaultCategory(), 1_500);
+        }
+        // CSDN 专栏入口在不同账号/编辑器版本中差异较大；仅在可见输入框存在时尝试填充。
+        if (StringUtils.hasText(config.defaultColumn())) {
+            browserAutomationService.fillFirstInPageOrFrames(page, List.of(
+                    "input[placeholder*='专栏']",
+                    "input[aria-label*='专栏']",
+                    "[role='combobox'][aria-label*='专栏']"
+            ), config.defaultColumn(), 1_500);
         }
     }
 
