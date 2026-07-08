@@ -23,6 +23,57 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     private static final String MODE_MANUAL_CONFIRM = "MANUAL_CONFIRM";
     private static final String DEFAULT_EDITOR_URL = "https://editor.csdn.net/md/";
     private static final String MANUAL_CONFIRM_MESSAGE = "已自动填充 CSDN 编辑器，请在浏览器中人工确认并发布。";
+    private static final List<String> TITLE_VALUE_SELECTORS = List.of(
+            "input[placeholder*='请输入文章标题']",
+            "textarea[placeholder*='请输入文章标题']",
+            "input[placeholder*='标题']",
+            "textarea[placeholder*='标题']",
+            "input[name='title']",
+            "[contenteditable='true'][placeholder*='请输入文章标题']",
+            "[contenteditable='true'][aria-label*='标题']",
+            "[role='textbox'][aria-label*='标题']",
+            "#txtTitle"
+    );
+    private static final List<String> TITLE_CLICK_SELECTORS = List.of(
+            "input[placeholder*='请输入文章标题']",
+            "textarea[placeholder*='请输入文章标题']",
+            "[contenteditable='true'][placeholder*='请输入文章标题']",
+            "[contenteditable='true'][aria-label*='标题']",
+            "[role='textbox'][aria-label*='标题']",
+            "text=请输入文章标题",
+            "text=请输入文章标题（5~100个字）"
+    );
+    private static final List<String> CONTENT_FILL_SELECTORS = List.of(
+            "textarea:not([placeholder*='标题'])",
+            "textarea[placeholder*='正文']",
+            "textarea[placeholder*='开始创作']",
+            "textarea[placeholder*='请输入正文']",
+            "textarea.markdown-editor",
+            "textarea#md-editor",
+            ".bytemd-editor textarea",
+            ".editor textarea",
+            ".CodeMirror textarea",
+            ".monaco-editor textarea"
+    );
+    private static final List<String> CONTENT_EDITABLE_SELECTORS = List.of(
+            "[contenteditable='true']:not([placeholder*='标题'])",
+            "[role='textbox']:not([aria-label*='标题'])",
+            ".cm-content",
+            ".CodeMirror-code",
+            ".monaco-editor textarea"
+    );
+    private static final List<String> EDITOR_READY_SELECTORS = List.of(
+            "input[placeholder*='请输入文章标题']",
+            "textarea[placeholder*='请输入文章标题']",
+            "text=请输入文章标题",
+            "textarea[placeholder*='正文']",
+            "textarea[placeholder*='开始创作']",
+            "[contenteditable='true']",
+            ".cm-content",
+            ".CodeMirror-code",
+            ".monaco-editor",
+            "textarea"
+    );
 
     private final BrowserAutomationService browserAutomationService;
     private final ObjectMapper objectMapper;
@@ -59,13 +110,22 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                     config.timeoutMs()
             ));
             Page page = session.page();
-            if (browserAutomationService.looksCaptchaBlocked(page)) {
-                return PublishResult.needCaptcha(config.editorUrl(), "CSDN 页面需要人工完成验证码或安全验证后重新执行发布任务");
-            }
-            if (browserAutomationService.looksLoggedOut(page)) {
-                return PublishResult.needLogin(config.editorUrl(), "CSDN 未检测到登录态，请在打开的浏览器中完成登录后重新执行发布任务");
+            if (isLoginPage(page)) {
+                return PublishResult.needLogin(currentOrConfiguredUrl(page, config), "CSDN 未检测到登录态，请在打开的浏览器中完成登录后重新执行发布任务");
             }
 
+            if (!waitForEditorReady(page, config.timeoutMs())) {
+                if (isLoginPage(page) || browserAutomationService.looksLoggedOut(page)) {
+                    return PublishResult.needLogin(currentOrConfiguredUrl(page, config), "CSDN 未检测到登录态，请在打开的浏览器中完成登录后重新执行发布任务");
+                }
+                if (browserAutomationService.looksCaptchaBlocked(page)) {
+                    return PublishResult.needCaptcha(currentOrConfiguredUrl(page, config), "CSDN 页面需要人工完成验证码或安全验证后重新执行发布任务");
+                }
+                return PublishResult.failed("CSDN 编辑器未检测到标题或正文可编辑区域，自动填充失败，请人工检查页面结构");
+            }
+            if (browserAutomationService.looksCaptchaBlocked(page)) {
+                return PublishResult.needCaptcha(currentOrConfiguredUrl(page, config), "CSDN 页面需要人工完成验证码或安全验证后重新执行发布任务");
+            }
             if (!fillTitle(page, context.title(), config.timeoutMs())) {
                 return PublishResult.failed("CSDN 编辑器标题输入框未找到，自动填充失败，请人工检查页面结构");
             }
@@ -74,8 +134,8 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             }
             fillOptionalMetadata(page, context, config);
             return PublishResult.needManualConfirm(
-                    config.editorUrl(),
-                    config.editorUrl(),
+                    currentOrConfiguredUrl(page, config),
+                    currentOrConfiguredUrl(page, config),
                     MANUAL_CONFIRM_MESSAGE
             );
         } catch (BusinessException exception) {
@@ -101,42 +161,31 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     }
 
     private boolean fillTitle(Page page, String title, double timeoutMs) {
-        return browserAutomationService.fillFirstInPageOrFrames(page, List.of(
-                "input[placeholder*='请输入文章标题']",
-                "textarea[placeholder*='请输入文章标题']",
-                "input[placeholder*='标题']",
-                "textarea[placeholder*='标题']",
-                "input[name='title']",
-                "[aria-label*='标题']",
-                "#txtTitle"
-        ), normalize(title, "未命名 CSDN 草稿"), timeoutMs);
+        String normalizedTitle = normalize(title, "未命名 CSDN 草稿");
+        if (browserAutomationService.fillFirstInPageOrFrames(page, TITLE_VALUE_SELECTORS, normalizedTitle, timeoutMs)
+                && titleFilled(page, normalizedTitle)) {
+            return true;
+        }
+        if (browserAutomationService.clickAndInsertFirstInPageOrFrames(page, TITLE_CLICK_SELECTORS, normalizedTitle, timeoutMs)
+                && titleFilled(page, normalizedTitle)) {
+            return true;
+        }
+        return browserAutomationService.pasteFirstInPageOrFrames(page, TITLE_CLICK_SELECTORS, normalizedTitle, timeoutMs)
+                && titleFilled(page, normalizedTitle);
     }
 
     private boolean fillContent(Page page, String content, double timeoutMs) {
         String normalizedContent = normalize(content, "");
-        List<String> fillSelectors = List.of(
-                "textarea[placeholder*='正文']",
-                "textarea[placeholder*='开始创作']",
-                "textarea[placeholder*='请输入正文']",
-                "textarea.markdown-editor",
-                "textarea#md-editor",
-                ".bytemd-editor textarea",
-                ".editor textarea"
-        );
-        if (browserAutomationService.fillFirstInPageOrFrames(page, fillSelectors, normalizedContent, timeoutMs)) {
+        if (browserAutomationService.fillFirstInPageOrFrames(page, CONTENT_FILL_SELECTORS, normalizedContent, timeoutMs)
+                && contentFilled(page, normalizedContent)) {
             return true;
         }
-        List<String> editorSelectors = List.of(
-                "[role='textbox']",
-                ".cm-content",
-                ".CodeMirror-code",
-                "[contenteditable='true']",
-                ".monaco-editor textarea"
-        );
-        if (browserAutomationService.clickAndInsertFirstInPageOrFrames(page, editorSelectors, normalizedContent, timeoutMs)) {
+        if (browserAutomationService.clickAndInsertFirstInPageOrFrames(page, CONTENT_EDITABLE_SELECTORS, normalizedContent, timeoutMs)
+                && contentFilled(page, normalizedContent)) {
             return true;
         }
-        return browserAutomationService.pasteFirstInPageOrFrames(page, editorSelectors, normalizedContent, timeoutMs);
+        return browserAutomationService.pasteFirstInPageOrFrames(page, CONTENT_EDITABLE_SELECTORS, normalizedContent, timeoutMs)
+                && contentFilled(page, normalizedContent);
     }
 
     private void fillOptionalMetadata(Page page, PublishContext context, BrowserPublisherConfig config) {
@@ -179,8 +228,59 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         return PLATFORM + ":" + context.accountId();
     }
 
+    private boolean waitForEditorReady(Page page, double timeoutMs) {
+        long deadline = System.currentTimeMillis() + Math.max(5_000, (long) timeoutMs);
+        while (System.currentTimeMillis() < deadline) {
+            if (isEditorUrl(page) && browserAutomationService.anyVisibleInPageOrFrames(page, EDITOR_READY_SELECTORS)) {
+                return true;
+            }
+            if (browserAutomationService.anyVisibleInPageOrFrames(page, TITLE_VALUE_SELECTORS)
+                    && browserAutomationService.anyVisibleInPageOrFrames(page, CONTENT_FILL_SELECTORS)) {
+                return true;
+            }
+            sleep(300);
+        }
+        return false;
+    }
+
+    private boolean isEditorUrl(Page page) {
+        String url = browserAutomationService.currentUrl(page);
+        return StringUtils.hasText(url)
+                && (url.contains("editor.csdn.net/md")
+                || url.contains("mp.csdn.net/mp_blog/creation/editor"));
+    }
+
+    private boolean isLoginPage(Page page) {
+        String url = browserAutomationService.currentUrl(page);
+        return StringUtils.hasText(url) && url.contains("passport.csdn.net/login");
+    }
+
+    private boolean titleFilled(Page page, String title) {
+        return browserAutomationService.selectorsContainTextOrValue(page, TITLE_VALUE_SELECTORS, title)
+                || browserAutomationService.containsTextInPageOrFrames(page, title);
+    }
+
+    private boolean contentFilled(Page page, String content) {
+        return browserAutomationService.selectorsContainTextOrValue(page, CONTENT_FILL_SELECTORS, content)
+                || browserAutomationService.selectorsContainTextOrValue(page, CONTENT_EDITABLE_SELECTORS, content)
+                || browserAutomationService.containsTextInPageOrFrames(page, content);
+    }
+
+    private String currentOrConfiguredUrl(Page page, BrowserPublisherConfig config) {
+        String currentUrl = browserAutomationService.currentUrl(page);
+        return StringUtils.hasText(currentUrl) ? currentUrl : config.editorUrl();
+    }
+
     private String normalize(String value, String defaultValue) {
         return StringUtils.hasText(value) ? value : defaultValue;
+    }
+
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private String safeMessage(RuntimeException exception) {

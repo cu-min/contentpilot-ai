@@ -5,6 +5,7 @@ import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Frame;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.TimeoutError;
 import com.microsoft.playwright.options.WaitUntilState;
@@ -30,10 +31,15 @@ public class BrowserAutomationService {
         validateRequest(request);
         BrowserAutomationSession existing = sessions.get(request.sessionKey());
         if (existing != null && existing.active()) {
-            navigate(existing.page(), request.editorUrl(), request.timeoutMsOrDefault());
-            return existing;
+            if (navigate(existing.page(), request.editorUrl(), request.timeoutMsOrDefault())) {
+                return existing;
+            }
+            closeQuietly(existing);
+            sessions.remove(request.sessionKey());
+        } else {
+            closeQuietly(existing);
+            sessions.remove(request.sessionKey());
         }
-        closeQuietly(existing);
 
         Playwright playwright = Playwright.create();
         BrowserType.LaunchPersistentContextOptions options = new BrowserType.LaunchPersistentContextOptions()
@@ -45,16 +51,27 @@ public class BrowserAutomationService {
         );
         context.setDefaultTimeout(request.timeoutMsOrDefault());
         Page page = context.pages().isEmpty() ? context.newPage() : context.pages().get(0);
-        navigate(page, request.editorUrl(), request.timeoutMsOrDefault());
+        if (!navigate(page, request.editorUrl(), request.timeoutMsOrDefault())) {
+            page = context.newPage();
+            navigate(page, request.editorUrl(), request.timeoutMsOrDefault());
+        }
 
         BrowserAutomationSession session = new BrowserAutomationSession(request.sessionKey(), playwright, context, page);
         sessions.put(request.sessionKey(), session);
         return session;
     }
 
+    public String currentUrl(Page page) {
+        try {
+            return page == null || page.isClosed() ? "" : page.url();
+        } catch (RuntimeException ignored) {
+            return "";
+        }
+    }
+
     public boolean looksLoggedOut(Page page) {
-        String url = page.url();
-        if (containsAny(url, List.of("login", "signin", "passport"))) {
+        String url = currentUrl(page);
+        if (containsAny(url, List.of("passport.csdn.net/login", "login", "signin"))) {
             return true;
         }
         return firstVisible(page, List.of(
@@ -63,6 +80,40 @@ public class BrowserAutomationService {
                 "text=登录后",
                 "text=请登录"
         ), 800);
+    }
+
+    public boolean waitForAnyVisibleInPageOrFrames(Page page, List<String> selectors, double timeoutMs) {
+        long deadline = System.currentTimeMillis() + Math.max(500, (long) timeoutMs);
+        while (System.currentTimeMillis() < deadline) {
+            if (anyVisibleInPageOrFrames(page, selectors)) {
+                return true;
+            }
+            sleep(200);
+        }
+        return false;
+    }
+
+    public boolean anyVisibleInPageOrFrames(Page page, List<String> selectors) {
+        if (page == null) {
+            return false;
+        }
+        for (String selector : selectors) {
+            if (isVisible(page, selector)) {
+                return true;
+            }
+        }
+        try {
+            for (Frame frame : page.frames()) {
+                for (String selector : selectors) {
+                    if (isVisible(frame, selector)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+        return false;
     }
 
     public boolean looksCaptchaBlocked(Page page) {
@@ -83,6 +134,58 @@ public class BrowserAutomationService {
                 "[class*='slider']",
                 "[id*='slider']"
         ), 800);
+    }
+
+    public boolean containsTextInPageOrFrames(Page page, String value) {
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        String snippet = value.length() > 60 ? value.substring(0, 60) : value;
+        if (containsText(page, snippet)) {
+            return true;
+        }
+        try {
+            for (Frame frame : page.frames()) {
+                if (containsText(frame, snippet)) {
+                    return true;
+                }
+            }
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+        return false;
+    }
+
+    public boolean selectorsContainTextOrValue(Page page, List<String> selectors, String value) {
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        String snippet = value.length() > 60 ? value.substring(0, 60) : value;
+        for (String selector : selectors) {
+            try {
+                if (locatorContains(page.locator(selector).first(), snippet)) {
+                    return true;
+                }
+            } catch (RuntimeException ignored) {
+                // Try the next selector.
+            }
+        }
+        try {
+            for (Frame frame : page.frames()) {
+                for (String selector : selectors) {
+                    try {
+                        if (locatorContains(frame.locator(selector).first(), snippet)) {
+                            return true;
+                        }
+                    } catch (RuntimeException ignored) {
+                        // Try the next selector/frame.
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+        return false;
     }
 
     public boolean fillFirst(Page page, List<String> selectors, String value, double timeoutMs) {
@@ -189,10 +292,23 @@ public class BrowserAutomationService {
         }
     }
 
-    private void navigate(Page page, String editorUrl, double timeoutMs) {
-        page.navigate(editorUrl, new Page.NavigateOptions()
-                .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
-                .setTimeout(timeoutMs));
+    private boolean navigate(Page page, String editorUrl, double timeoutMs) {
+        try {
+            if (page == null || page.isClosed()) {
+                return false;
+            }
+            page.navigate(editorUrl, new Page.NavigateOptions()
+                    .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
+                    .setTimeout(timeoutMs));
+            return true;
+        } catch (PlaywrightException exception) {
+            if (isRecoverableNavigationException(exception) && StringUtils.hasText(currentUrl(page))) {
+                return true;
+            }
+            return false;
+        } catch (RuntimeException ignored) {
+            return StringUtils.hasText(currentUrl(page));
+        }
     }
 
     private boolean tryFill(Page page, String selector, String value, double timeoutMs) {
@@ -322,6 +438,73 @@ public class BrowserAutomationService {
         }
         String lowerValue = value.toLowerCase();
         return needles.stream().anyMatch(lowerValue::contains);
+    }
+
+    private boolean isVisible(Page page, String selector) {
+        try {
+            return page.locator(selector).first().isVisible();
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean isVisible(Frame frame, String selector) {
+        try {
+            return frame.locator(selector).first().isVisible();
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean containsText(Page page, String value) {
+        try {
+            String bodyText = page.locator("body").textContent();
+            return StringUtils.hasText(bodyText) && bodyText.contains(value);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean containsText(Frame frame, String value) {
+        try {
+            String bodyText = frame.locator("body").textContent();
+            return StringUtils.hasText(bodyText) && bodyText.contains(value);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean locatorContains(Locator locator, String value) {
+        try {
+            String inputValue = locator.inputValue();
+            if (StringUtils.hasText(inputValue) && inputValue.contains(value)) {
+                return true;
+            }
+        } catch (RuntimeException ignored) {
+            // Non-input locators do not support inputValue.
+        }
+        try {
+            String textContent = locator.textContent();
+            return StringUtils.hasText(textContent) && textContent.contains(value);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean isRecoverableNavigationException(RuntimeException exception) {
+        String message = exception.getMessage();
+        return StringUtils.hasText(message)
+                && (message.contains("Object doesn't exist: response@")
+                || message.contains("Object doesn't exist: request@")
+                || message.contains("net::ERR_ABORTED"));
+    }
+
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private String selectAllShortcut() {

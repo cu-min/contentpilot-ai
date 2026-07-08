@@ -12,7 +12,11 @@ public record BrowserAutomationSession(
 ) implements AutoCloseable {
 
     public boolean active() {
-        return page != null && !page.isClosed();
+        try {
+            return page != null && !page.isClosed();
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     @Override
