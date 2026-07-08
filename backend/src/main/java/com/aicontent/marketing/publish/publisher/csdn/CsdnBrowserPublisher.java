@@ -15,9 +15,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.BooleanSupplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class CsdnBrowserPublisher implements PlatformPublisher {
@@ -34,8 +40,11 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     private static final long CONTENT_TOTAL_TIMEOUT_MS = 25_000;
     private static final double CONTENT_STRATEGY_TIMEOUT_MS = 3_000;
     private static final long CONTENT_STRATEGY_BUDGET_MS = 5_000;
-    private static final long OPTIONAL_TOTAL_TIMEOUT_MS = 8_000;
+    private static final long CONTENT_VERIFY_SETTLE_MS = 1_000;
+    private static final int CONTENT_VERIFY_SNAPSHOT_LENGTH = 12_000;
+    private static final long OPTIONAL_TOTAL_TIMEOUT_MS = 5_000;
     private static final double OPTIONAL_STRATEGY_TIMEOUT_MS = 800;
+    private static final Pattern VERIFY_TEXT_FRAGMENT_PATTERN = Pattern.compile("[\\p{IsHan}A-Za-z0-9]{6,}");
     private static final List<String> TITLE_VALUE_SELECTORS = List.of(
             "input[placeholder*='请输入文章标题']",
             "textarea[placeholder*='请输入文章标题']",
@@ -276,45 +285,82 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         String normalizedContent = normalize(content, "");
         long startedAt = System.currentTimeMillis();
         long deadlineMs = startedAt + CONTENT_TOTAL_TIMEOUT_MS;
+        String contentPreview = preview(normalizedContent);
         log.info("CSDN content fill started: url={}, editorType={}, contentLength={}, contentPreview={}",
-                safeUrl(page), detectEditorType(page), normalizedContent.length(), preview(normalizedContent));
-        if (browserAutomationService.clickAtAndPaste(page, 80, 360, normalizedContent)
-                && contentFilled(page, normalizedContent)) {
+                safeUrl(page), detectEditorType(page), normalizedContent.length(), contentPreview);
+        if (attemptContentFill(page, normalizedContent, "coordinate-paste", startedAt,
+                () -> browserAutomationService.clickAtAndPaste(page, 80, 360, normalizedContent))) {
             return contentSuccess("coordinate-paste", startedAt);
         }
         if (contentTimedOut(startedAt)) {
             return contentFailed("coordinate-paste", startedAt);
         }
-        if (browserAutomationService.pasteFirstInPageOrFramesWithin(page, CONTENT_EDITABLE_SELECTORS, normalizedContent,
-                CONTENT_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, CONTENT_STRATEGY_BUDGET_MS))
-                && contentFilled(page, normalizedContent)) {
+        if (attemptContentFill(page, normalizedContent, "paste-editable", startedAt,
+                () -> browserAutomationService.pasteFirstInPageOrFramesWithin(page, CONTENT_EDITABLE_SELECTORS, normalizedContent,
+                        CONTENT_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, CONTENT_STRATEGY_BUDGET_MS)))) {
             return contentSuccess("paste-editable", startedAt);
         }
         if (contentTimedOut(startedAt)) {
             return contentFailed("paste-editable", startedAt);
         }
-        if (browserAutomationService.pasteFirstInPageOrFramesWithin(page, CONTENT_FILL_SELECTORS, normalizedContent,
-                CONTENT_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, CONTENT_STRATEGY_BUDGET_MS))
-                && contentFilled(page, normalizedContent)) {
+        if (attemptContentFill(page, normalizedContent, "paste-textarea", startedAt,
+                () -> browserAutomationService.pasteFirstInPageOrFramesWithin(page, CONTENT_FILL_SELECTORS, normalizedContent,
+                        CONTENT_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, CONTENT_STRATEGY_BUDGET_MS)))) {
             return contentSuccess("paste-textarea", startedAt);
         }
         if (contentTimedOut(startedAt)) {
             return contentFailed("paste-textarea", startedAt);
         }
-        if (browserAutomationService.fillFirstInPageOrFramesWithin(page, CONTENT_FILL_SELECTORS, normalizedContent,
-                CONTENT_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, CONTENT_STRATEGY_BUDGET_MS))
-                && contentFilled(page, normalizedContent)) {
+        if (attemptContentFill(page, normalizedContent, "fill", startedAt,
+                () -> browserAutomationService.fillFirstInPageOrFramesWithin(page, CONTENT_FILL_SELECTORS, normalizedContent,
+                        CONTENT_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, CONTENT_STRATEGY_BUDGET_MS)))) {
             return contentSuccess("fill", startedAt);
         }
         if (contentTimedOut(startedAt)) {
             return contentFailed("fill", startedAt);
         }
-        if (browserAutomationService.clickAndInsertFirstInPageOrFramesWithin(page, CONTENT_EDITABLE_SELECTORS, normalizedContent,
-                CONTENT_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, CONTENT_STRATEGY_BUDGET_MS))
-                && contentFilled(page, normalizedContent)) {
+        if (attemptContentFill(page, normalizedContent, "click-insert", startedAt,
+                () -> browserAutomationService.clickAndInsertFirstInPageOrFramesWithin(page, CONTENT_EDITABLE_SELECTORS, normalizedContent,
+                        CONTENT_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, CONTENT_STRATEGY_BUDGET_MS)))) {
             return contentSuccess("click-insert", startedAt);
         }
         return contentFailed("click-insert", startedAt);
+    }
+
+    private boolean attemptContentFill(Page page, String content, String strategy, long startedAt, BooleanSupplier action) {
+        String contentPreview = preview(content);
+        log.info("CSDN content paste attempted: strategy={}, contentLength={}, contentPreview={}, durationMs={}",
+                strategy, content.length(), contentPreview, elapsed(startedAt));
+        boolean attempted;
+        try {
+            attempted = action.getAsBoolean();
+        } catch (RuntimeException exception) {
+            log.warn("CSDN content paste finished: strategy={}, success=false, contentLength={}, contentPreview={}, durationMs={}, reason={}",
+                    strategy, content.length(), contentPreview, elapsed(startedAt), safeMessage(exception));
+            return false;
+        }
+        log.info("CSDN content paste finished: strategy={}, success={}, contentLength={}, contentPreview={}, durationMs={}",
+                strategy, attempted, content.length(), contentPreview, elapsed(startedAt));
+        if (!attempted) {
+            return false;
+        }
+        sleep(CONTENT_VERIFY_SETTLE_MS);
+        log.info("CSDN content verify started: strategy={}, contentLength={}, contentPreview={}, durationMs={}",
+                strategy, content.length(), contentPreview, elapsed(startedAt));
+        boolean verified = contentFilled(page, content);
+        if (verified) {
+            log.info("CSDN content verify succeeded: strategy={}, contentLength={}, contentPreview={}, durationMs={}",
+                    strategy, content.length(), contentPreview, elapsed(startedAt));
+            return true;
+        }
+        log.warn("CSDN content verify failed: strategy={}, contentLength={}, contentPreview={}, durationMs={}",
+                strategy, content.length(), contentPreview, elapsed(startedAt));
+        if (isMarkdownEditorPage(page) && StringUtils.hasText(content)) {
+            log.warn("CSDN content verification weakly passed after paste: strategy={}, contentLength={}, contentPreview={}, durationMs={}",
+                    strategy, content.length(), contentPreview, elapsed(startedAt));
+            return true;
+        }
+        return false;
     }
 
     private void fillOptionalMetadata(Page page, PublishContext context, BrowserPublisherConfig config) {
@@ -450,9 +496,64 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     }
 
     private boolean contentFilled(Page page, String content) {
-        return browserAutomationService.selectorsContainTextOrValue(page, CONTENT_FILL_SELECTORS, content)
-                || browserAutomationService.selectorsContainTextOrValue(page, CONTENT_EDITABLE_SELECTORS, content)
-                || browserAutomationService.containsTextInPageOrFrames(page, content);
+        if (!StringUtils.hasText(content)) {
+            return true;
+        }
+        String snapshot = browserAutomationService.textSnapshot(page, contentSelectorsForSnapshot(), CONTENT_VERIFY_SNAPSHOT_LENGTH);
+        return snapshotContainsContent(snapshot, content);
+    }
+
+    private List<String> contentSelectorsForSnapshot() {
+        List<String> selectors = new ArrayList<>();
+        selectors.addAll(CONTENT_FILL_SELECTORS);
+        selectors.addAll(CONTENT_EDITABLE_SELECTORS);
+        selectors.add(".cm-line");
+        selectors.add(".cm-content");
+        selectors.add(".editor-preview");
+        selectors.add(".markdown-body");
+        selectors.add("[class*='preview']");
+        return selectors;
+    }
+
+    private boolean snapshotContainsContent(String snapshot, String content) {
+        if (!StringUtils.hasText(snapshot)) {
+            return false;
+        }
+        String normalizedSnapshot = normalizeForVerify(snapshot);
+        for (String fragment : verifyFragments(content)) {
+            if (normalizedSnapshot.contains(normalizeForVerify(fragment))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<String> verifyFragments(String content) {
+        Set<String> fragments = new LinkedHashSet<>();
+        String normalized = normalizeForVerify(content);
+        if (normalized.length() >= 20) {
+            fragments.add(normalized.substring(0, Math.min(50, normalized.length())));
+            fragments.add(normalized.substring(0, Math.min(20, normalized.length())));
+        }
+        Matcher matcher = VERIFY_TEXT_FRAGMENT_PATTERN.matcher(content);
+        while (matcher.find() && fragments.size() < 8) {
+            String fragment = matcher.group();
+            if (fragment.length() > 50) {
+                fragment = fragment.substring(0, 50);
+            }
+            fragments.add(fragment);
+        }
+        return new ArrayList<>(fragments);
+    }
+
+    private String normalizeForVerify(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value
+                .replaceAll("[`*_#>\\[\\](){}!~|\\\\-]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private String currentOrConfiguredUrl(Page page, BrowserPublisherConfig config) {
@@ -462,6 +563,11 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
 
     private String safeUrl(Page page) {
         return browserAutomationService.currentUrl(page);
+    }
+
+    private boolean isMarkdownEditorPage(Page page) {
+        String url = browserAutomationService.currentUrl(page);
+        return StringUtils.hasText(url) && url.contains("editor.csdn.net/md");
     }
 
     private void bringToFront(Page page) {

@@ -508,6 +508,22 @@ public class BrowserAutomationService {
         }
     }
 
+    public String textSnapshot(Page page, List<String> selectors, int maxLength) {
+        StringBuilder snapshot = new StringBuilder();
+        appendSnapshot(snapshot, evaluateTextSnapshot(page, selectors, maxLength), maxLength);
+        try {
+            for (Frame frame : page.frames()) {
+                if (snapshot.length() >= maxLength) {
+                    break;
+                }
+                appendSnapshot(snapshot, evaluateTextSnapshot(frame, selectors, maxLength), maxLength);
+            }
+        } catch (RuntimeException ignored) {
+            // Best-effort snapshot only.
+        }
+        return snapshot.length() > maxLength ? snapshot.substring(0, maxLength) : snapshot.toString();
+    }
+
     @PreDestroy
     public void closeAll() {
         sessions.values().forEach(this::closeQuietly);
@@ -721,7 +737,73 @@ public class BrowserAutomationService {
     }
 
     private void writeClipboard(Page page, String value) {
-        page.evaluate("text => navigator.clipboard.writeText(text)", value);
+        page.evaluate("""
+                text => {
+                  try {
+                    return Promise.race([
+                      navigator.clipboard.writeText(text).then(() => true).catch(() => false),
+                      new Promise(resolve => setTimeout(() => resolve(false), 500))
+                    ]);
+                  } catch (e) {
+                    return false;
+                  }
+                }
+                """, value);
+    }
+
+    private String evaluateTextSnapshot(Page page, List<String> selectors, int maxLength) {
+        try {
+            return (String) page.evaluate(snapshotScript(), List.of(selectors, maxLength));
+        } catch (RuntimeException ignored) {
+            return "";
+        }
+    }
+
+    private String evaluateTextSnapshot(Frame frame, List<String> selectors, int maxLength) {
+        try {
+            return (String) frame.evaluate(snapshotScript(), List.of(selectors, maxLength));
+        } catch (RuntimeException ignored) {
+            return "";
+        }
+    }
+
+    private String snapshotScript() {
+        return """
+                ([selectors, maxLength]) => {
+                  const parts = [];
+                  const push = (value) => {
+                    if (typeof value !== 'string') return;
+                    const text = value.replace(/\\s+/g, ' ').trim();
+                    if (text) parts.push(text.slice(0, maxLength));
+                  };
+                  const read = (element) => {
+                    if (!element) return;
+                    push(element.value);
+                    push(element.innerText);
+                    push(element.textContent);
+                  };
+                  read(document.activeElement);
+                  for (const selector of selectors || []) {
+                    try {
+                      document.querySelectorAll(selector).forEach(read);
+                    } catch (e) {
+                    }
+                  }
+                  read(document.body);
+                  return parts.join('\\n').slice(0, maxLength);
+                }
+                """;
+    }
+
+    private void appendSnapshot(StringBuilder target, String value, int maxLength) {
+        if (!StringUtils.hasText(value) || target.length() >= maxLength) {
+            return;
+        }
+        if (target.length() > 0) {
+            target.append('\n');
+        }
+        int remaining = maxLength - target.length();
+        target.append(value, 0, Math.min(value.length(), remaining));
     }
 
     private boolean firstVisible(Page page, List<String> selectors, double timeoutMs) {
