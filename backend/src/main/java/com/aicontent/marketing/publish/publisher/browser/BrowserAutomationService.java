@@ -69,6 +69,33 @@ public class BrowserAutomationService {
         }
     }
 
+    public List<Page> activePages(BrowserAutomationSession session) {
+        try {
+            return session.context().pages().stream()
+                    .filter(page -> {
+                        try {
+                            return !page.isClosed();
+                        } catch (RuntimeException ignored) {
+                            return false;
+                        }
+                    })
+                    .toList();
+        } catch (RuntimeException ignored) {
+            return List.of();
+        }
+    }
+
+    public Page latestPageMatching(BrowserAutomationSession session, String urlPart) {
+        List<Page> pages = activePages(session);
+        for (int index = pages.size() - 1; index >= 0; index--) {
+            Page page = pages.get(index);
+            if (currentUrl(page).contains(urlPart)) {
+                return page;
+            }
+        }
+        return null;
+    }
+
     public boolean looksLoggedOut(Page page) {
         String url = currentUrl(page);
         if (containsAny(url, List.of("passport.csdn.net/login", "login", "signin"))) {
@@ -257,6 +284,65 @@ public class BrowserAutomationService {
         return false;
     }
 
+    public boolean clickAtAndInsert(Page page, double x, double y, String value) {
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        try {
+            page.mouse().click(x, y);
+            page.keyboard().press(selectAllShortcut());
+            page.keyboard().insertText(value);
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    public boolean clickAtAndPaste(Page page, double x, double y, String value) {
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        try {
+            page.mouse().click(x, y);
+            writeClipboard(page, value);
+            page.keyboard().press(pasteShortcut());
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    public boolean clickFirstInPageOrFrames(Page page, List<String> selectors, double timeoutMs) {
+        for (String selector : selectors) {
+            if (tryClick(page, selector, timeoutMs)) {
+                return true;
+            }
+            try {
+                for (Frame frame : page.frames()) {
+                    if (tryClick(frame, selector, timeoutMs)) {
+                        return true;
+                    }
+                }
+            } catch (RuntimeException ignored) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    public boolean clickTextInPageOrFrames(Page page, List<String> texts, double timeoutMs) {
+        for (String text : texts) {
+            if (!StringUtils.hasText(text)) {
+                continue;
+            }
+            String selector = "text=" + text;
+            if (clickFirstInPageOrFrames(page, List.of(selector), timeoutMs)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public boolean fillTagLikeInputs(Page page, List<String> values, List<String> selectors, double timeoutMs) {
         if (values == null || values.isEmpty()) {
             return true;
@@ -272,6 +358,40 @@ public class BrowserAutomationService {
             }
         }
         return false;
+    }
+
+    public List<String> elementSummaries(Page page, List<String> selectors, int maxItems) {
+        try {
+            @SuppressWarnings("unchecked")
+            List<String> summaries = (List<String>) page.evaluate("""
+                    ([selectors, maxItems]) => {
+                      const result = [];
+                      const seen = new Set();
+                      const pushElement = (element, selector) => {
+                        if (!element || seen.has(element) || result.length >= maxItems) return;
+                        seen.add(element);
+                        const attrs = [];
+                        if (element.placeholder) attrs.push(`placeholder=${element.placeholder}`);
+                        const aria = element.getAttribute && element.getAttribute('aria-label');
+                        if (aria) attrs.push(`aria=${aria}`);
+                        const role = element.getAttribute && element.getAttribute('role');
+                        if (role) attrs.push(`role=${role}`);
+                        const text = (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 50);
+                        result.push(`${selector} <${element.tagName.toLowerCase()}> ${attrs.join(' ')} text=${text}`);
+                      };
+                      for (const selector of selectors) {
+                        try {
+                          document.querySelectorAll(selector).forEach(element => pushElement(element, selector));
+                        } catch (e) {
+                        }
+                      }
+                      return result;
+                    }
+                    """, List.of(selectors, maxItems));
+            return summaries;
+        } catch (RuntimeException ignored) {
+            return List.of();
+        }
     }
 
     @PreDestroy
@@ -337,6 +457,24 @@ public class BrowserAutomationService {
             page.locator(selector).first().click(new Locator.ClickOptions().setTimeout(timeoutMs));
             page.keyboard().press(selectAllShortcut());
             page.keyboard().insertText(value);
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean tryClick(Page page, String selector, double timeoutMs) {
+        try {
+            page.locator(selector).first().click(new Locator.ClickOptions().setTimeout(timeoutMs));
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean tryClick(Frame frame, String selector, double timeoutMs) {
+        try {
+            frame.locator(selector).first().click(new Locator.ClickOptions().setTimeout(timeoutMs));
             return true;
         } catch (RuntimeException ignored) {
             return false;

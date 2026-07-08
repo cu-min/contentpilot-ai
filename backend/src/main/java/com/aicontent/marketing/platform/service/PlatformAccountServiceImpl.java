@@ -218,7 +218,7 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
 
     private String defaultBrowserEditorUrl(String platform) {
         if ("CSDN".equals(platform)) {
-            return "https://editor.csdn.net/md/";
+            return "https://editor.csdn.net/md/?not_checkout=1";
         }
         if ("ZHIHU".equals(platform)) {
             return "https://zhuanlan.zhihu.com/write";

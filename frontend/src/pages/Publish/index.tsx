@@ -432,6 +432,13 @@ export default function Publish() {
     });
   };
 
+  const getPublishDisplayTime = (record: PublishTask) => {
+    if (record.publishType === 'SCHEDULED' && record.scheduleTime) {
+      return record.scheduleTime;
+    }
+    return record.updatedAt || record.createdAt || '-';
+  };
+
   const renderTaskActions = (record: PublishTask) => {
     if (record.status === 'DRAFT') {
       return (
@@ -526,11 +533,11 @@ export default function Publish() {
       render: (mode: string) => <Tag>{getPublishModeLabel(mode)}</Tag>,
     },
     {
-      title: '计划时间',
-      dataIndex: 'scheduleTime',
+      title: '发布时间',
+      key: 'publishTime',
       width: 150,
       responsive: ['xl'],
-      render: (value?: string) => value || '-',
+      render: (_, record) => getPublishDisplayTime(record),
     },
     {
       title: '发布结果',
