@@ -16,6 +16,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 @Component
 public class CsdnBrowserPublisher implements PlatformPublisher {
@@ -26,6 +28,14 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     private static final String DEFAULT_EDITOR_URL = "https://editor.csdn.net/md/?not_checkout=1";
     private static final String MANUAL_CONFIRM_MESSAGE = "已自动填充 CSDN 编辑器，请在浏览器中人工确认并发布";
     private static final Logger log = LoggerFactory.getLogger(CsdnBrowserPublisher.class);
+    private static final long TITLE_TOTAL_TIMEOUT_MS = 15_000;
+    private static final double TITLE_STRATEGY_TIMEOUT_MS = 2_500;
+    private static final long TITLE_STRATEGY_BUDGET_MS = 3_000;
+    private static final long CONTENT_TOTAL_TIMEOUT_MS = 25_000;
+    private static final double CONTENT_STRATEGY_TIMEOUT_MS = 3_000;
+    private static final long CONTENT_STRATEGY_BUDGET_MS = 5_000;
+    private static final long OPTIONAL_TOTAL_TIMEOUT_MS = 8_000;
+    private static final double OPTIONAL_STRATEGY_TIMEOUT_MS = 800;
     private static final List<String> TITLE_VALUE_SELECTORS = List.of(
             "input[placeholder*='请输入文章标题']",
             "textarea[placeholder*='请输入文章标题']",
@@ -95,6 +105,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
 
     private final BrowserAutomationService browserAutomationService;
     private final ObjectMapper objectMapper;
+    private final ReentrantLock automationLock = new ReentrantLock();
 
     public CsdnBrowserPublisher(BrowserAutomationService browserAutomationService, ObjectMapper objectMapper) {
         this.browserAutomationService = browserAutomationService;
@@ -113,7 +124,13 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
 
     @Override
     public PublishResult publish(PublishContext context) {
+        boolean locked = false;
         try {
+            locked = automationLock.tryLock(1, TimeUnit.SECONDS);
+            if (!locked) {
+                log.warn("CSDN browser automation rejected: another task is running, taskId={}", context.taskId());
+                return PublishResult.failed("已有 CSDN 自动化任务正在执行，请完成后再重试");
+            }
             validateContext(context);
             BrowserPublisherConfig config = BrowserPublisherConfig.parse(
                     context.accountAuthConfig(),
@@ -144,6 +161,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                 log.warn("CSDN editor automation did not reach markdown editor: url={}, editorType={}", safeUrl(page), editorType);
                 return PublishResult.failed("未能切换到 CSDN Markdown 编辑器");
             }
+            log.info("CSDN markdown page selected: taskId={}, url={}", context.taskId(), safeUrl(page));
 
             if (!waitForMarkdownEditorReady(page, config.timeoutMs())) {
                 if (isLoginPage(page) || browserAutomationService.looksLoggedOut(page)) {
@@ -159,24 +177,44 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                 return PublishResult.needCaptcha(currentOrConfiguredUrl(page, config), "CSDN 页面需要人工完成验证码或安全验证后重新执行发布任务");
             }
             dismissDraftPrompt(page);
-            if (!fillTitle(page, context.title(), config.timeoutMs())) {
+            FillOutcome titleOutcome = fillTitle(page, context.title());
+            if (!titleOutcome.success()) {
                 logTitleCandidates(page, editorType);
-                return PublishResult.failed("CSDN Markdown 编辑器标题填充失败，请人工检查页面结构");
+                String message = titleOutcome.timedOut()
+                        ? "CSDN Markdown 标题填充超时"
+                        : "CSDN Markdown 标题填充失败，请人工检查页面结构";
+                return PublishResult.failed(message);
             }
-            if (!fillContent(page, context.content(), config.timeoutMs())) {
-                return PublishResult.failed("CSDN Markdown 编辑器正文填充失败，请人工检查页面结构");
+            FillOutcome contentOutcome = fillContent(page, context.content());
+            if (!contentOutcome.success()) {
+                return PublishResult.failed("CSDN Markdown 正文填充失败。请人工检查页面结构");
+            }
+            if (config.manualConfirm()) {
+                log.info("CSDN optional fields skipped: reason=manualConfirm, taskId={}", context.taskId());
+                return manualConfirmResult(context, page, config);
             }
             fillOptionalMetadata(page, context, config);
-            return PublishResult.needManualConfirm(
-                    currentOrConfiguredUrl(page, config),
-                    currentOrConfiguredUrl(page, config),
-                    MANUAL_CONFIRM_MESSAGE
-            );
+            return manualConfirmResult(context, page, config);
         } catch (BusinessException exception) {
             return PublishResult.failed(exception.getMessage());
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return PublishResult.failed("CSDN 自动化任务等待执行锁被中断");
         } catch (RuntimeException exception) {
             return PublishResult.linkFetchFailed(null, "CSDN 编辑器页面打开或填充失败：" + safeMessage(exception));
+        } finally {
+            if (locked) {
+                automationLock.unlock();
+            }
         }
+    }
+
+    private PublishResult manualConfirmResult(PublishContext context, Page page, BrowserPublisherConfig config) {
+        String url = currentOrConfiguredUrl(page, config);
+        PublishResult result = PublishResult.needManualConfirm(url, url, MANUAL_CONFIRM_MESSAGE);
+        log.info("CSDN manual confirm result returned: taskId={}, url={}", context.taskId(), url);
+        log.info("CSDN publish task result status = NEED_MANUAL_CONFIRM");
+        return result;
     }
 
     private void validateContext(PublishContext context) {
@@ -194,97 +232,139 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         }
     }
 
-    private boolean fillTitle(Page page, String title, double timeoutMs) {
+    private FillOutcome fillTitle(Page page, String title) {
         String normalizedTitle = normalize(title, "未命名 CSDN 草稿");
+        long startedAt = System.currentTimeMillis();
+        long deadlineMs = startedAt + TITLE_TOTAL_TIMEOUT_MS;
         int candidateCount = browserAutomationService.elementSummaries(page, TITLE_CLICK_SELECTORS, 20).size();
-        log.info("CSDN title fill started: url={}, editorType={}, candidateCount={}",
-                safeUrl(page), detectEditorType(page), candidateCount);
-        if (browserAutomationService.fillFirstInPageOrFrames(page, TITLE_VALUE_SELECTORS, normalizedTitle, timeoutMs)
+        log.info("CSDN title fill started: url={}, editorType={}, candidateCount={}, titleLength={}",
+                safeUrl(page), detectEditorType(page), candidateCount, normalizedTitle.length());
+        if (browserAutomationService.fillFirstInPageOrFramesWithin(page, TITLE_VALUE_SELECTORS, normalizedTitle,
+                TITLE_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, TITLE_STRATEGY_BUDGET_MS))
                 && titleFilled(page, normalizedTitle)) {
-            log.info("CSDN title fill succeeded: strategy=fill, verified=true");
-            return true;
+            return titleSuccess("fill", startedAt);
         }
-        if (browserAutomationService.clickAndInsertFirstInPageOrFrames(page, TITLE_CLICK_SELECTORS, normalizedTitle, timeoutMs)
+        if (titleTimedOut(startedAt)) {
+            return titleFailed("fill", startedAt, true);
+        }
+        if (browserAutomationService.clickAndInsertFirstInPageOrFramesWithin(page, TITLE_CLICK_SELECTORS, normalizedTitle,
+                TITLE_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, TITLE_STRATEGY_BUDGET_MS))
                 && titleFilled(page, normalizedTitle)) {
-            log.info("CSDN title fill succeeded: strategy=click-insert, verified=true");
-            return true;
+            return titleSuccess("click-insert", startedAt);
         }
-        boolean pasted = browserAutomationService.pasteFirstInPageOrFrames(page, TITLE_CLICK_SELECTORS, normalizedTitle, timeoutMs)
+        if (titleTimedOut(startedAt)) {
+            return titleFailed("click-insert", startedAt, true);
+        }
+        boolean pasted = browserAutomationService.pasteFirstInPageOrFramesWithin(page, TITLE_CLICK_SELECTORS, normalizedTitle,
+                TITLE_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, TITLE_STRATEGY_BUDGET_MS))
                 && titleFilled(page, normalizedTitle);
         if (pasted) {
-            log.info("CSDN title fill succeeded: strategy=paste, verified=true");
-            return true;
+            return titleSuccess("paste", startedAt);
+        }
+        if (titleTimedOut(startedAt)) {
+            return titleFailed("paste", startedAt, true);
         }
         boolean coordinateInserted = browserAutomationService.clickAtAndInsert(page, 300, 135, normalizedTitle)
                 && titleFilled(page, normalizedTitle);
-        log.info("CSDN title fill finished: strategy=coordinate-insert, verified={}", coordinateInserted);
-        return coordinateInserted;
+        if (coordinateInserted) {
+            return titleSuccess("coordinate-insert", startedAt);
+        }
+        return titleFailed("coordinate-insert", startedAt, titleTimedOut(startedAt));
     }
 
-    private boolean fillContent(Page page, String content, double timeoutMs) {
+    private FillOutcome fillContent(Page page, String content) {
         String normalizedContent = normalize(content, "");
+        long startedAt = System.currentTimeMillis();
+        long deadlineMs = startedAt + CONTENT_TOTAL_TIMEOUT_MS;
+        log.info("CSDN content fill started: url={}, editorType={}, contentLength={}, contentPreview={}",
+                safeUrl(page), detectEditorType(page), normalizedContent.length(), preview(normalizedContent));
         if (browserAutomationService.clickAtAndPaste(page, 80, 360, normalizedContent)
                 && contentFilled(page, normalizedContent)) {
-            log.info("CSDN content fill succeeded: strategy=coordinate-paste, verified=true");
-            return true;
+            return contentSuccess("coordinate-paste", startedAt);
         }
-        if (browserAutomationService.pasteFirstInPageOrFrames(page, CONTENT_EDITABLE_SELECTORS, normalizedContent, timeoutMs)
+        if (contentTimedOut(startedAt)) {
+            return contentFailed("coordinate-paste", startedAt);
+        }
+        if (browserAutomationService.pasteFirstInPageOrFramesWithin(page, CONTENT_EDITABLE_SELECTORS, normalizedContent,
+                CONTENT_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, CONTENT_STRATEGY_BUDGET_MS))
                 && contentFilled(page, normalizedContent)) {
-            log.info("CSDN content fill succeeded: strategy=paste-editable, verified=true");
-            return true;
+            return contentSuccess("paste-editable", startedAt);
         }
-        if (browserAutomationService.pasteFirstInPageOrFrames(page, CONTENT_FILL_SELECTORS, normalizedContent, timeoutMs)
+        if (contentTimedOut(startedAt)) {
+            return contentFailed("paste-editable", startedAt);
+        }
+        if (browserAutomationService.pasteFirstInPageOrFramesWithin(page, CONTENT_FILL_SELECTORS, normalizedContent,
+                CONTENT_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, CONTENT_STRATEGY_BUDGET_MS))
                 && contentFilled(page, normalizedContent)) {
-            log.info("CSDN content fill succeeded: strategy=paste-textarea, verified=true");
-            return true;
+            return contentSuccess("paste-textarea", startedAt);
         }
-        if (browserAutomationService.fillFirstInPageOrFrames(page, CONTENT_FILL_SELECTORS, normalizedContent, timeoutMs)
+        if (contentTimedOut(startedAt)) {
+            return contentFailed("paste-textarea", startedAt);
+        }
+        if (browserAutomationService.fillFirstInPageOrFramesWithin(page, CONTENT_FILL_SELECTORS, normalizedContent,
+                CONTENT_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, CONTENT_STRATEGY_BUDGET_MS))
                 && contentFilled(page, normalizedContent)) {
-            log.info("CSDN content fill succeeded: strategy=fill, verified=true");
-            return true;
+            return contentSuccess("fill", startedAt);
         }
-        if (browserAutomationService.clickAndInsertFirstInPageOrFrames(page, CONTENT_EDITABLE_SELECTORS, normalizedContent, timeoutMs)
+        if (contentTimedOut(startedAt)) {
+            return contentFailed("fill", startedAt);
+        }
+        if (browserAutomationService.clickAndInsertFirstInPageOrFramesWithin(page, CONTENT_EDITABLE_SELECTORS, normalizedContent,
+                CONTENT_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, CONTENT_STRATEGY_BUDGET_MS))
                 && contentFilled(page, normalizedContent)) {
-            log.info("CSDN content fill succeeded: strategy=click-insert, verified=true");
-            return true;
+            return contentSuccess("click-insert", startedAt);
         }
-        log.warn("CSDN content fill failed: url={}, editorType={}", safeUrl(page), detectEditorType(page));
-        return false;
+        return contentFailed("click-insert", startedAt);
     }
 
     private void fillOptionalMetadata(Page page, PublishContext context, BrowserPublisherConfig config) {
-        browserAutomationService.fillTagLikeInputs(page, config.defaultTags(), List.of(
-                "input[placeholder*='文章标签']",
-                "input[placeholder*='标签']",
-                "input[aria-label*='标签']"
-        ), 1_500);
-        String summary = StringUtils.hasText(config.defaultSummary())
-                ? config.defaultSummary()
-                : normalize(context.summary(), "");
-        if (StringUtils.hasText(summary)) {
-            browserAutomationService.fillFirstInPageOrFrames(page, List.of(
-                    "textarea[placeholder*='摘要']",
-                    "textarea[placeholder*='简介']",
-                    "textarea[placeholder*='描述']",
-                    "input[placeholder*='摘要']",
-                    "[aria-label*='摘要']"
-            ), summary, 1_500);
+        long startedAt = System.currentTimeMillis();
+        long deadlineMs = startedAt + OPTIONAL_TOTAL_TIMEOUT_MS;
+        log.info("CSDN optional fields fill started: url={}", safeUrl(page));
+        if ((config.defaultTags() == null || config.defaultTags().isEmpty())
+                && !StringUtils.hasText(config.defaultSummary())
+                && !StringUtils.hasText(context.summary())
+                && !StringUtils.hasText(config.defaultCategory())
+                && !StringUtils.hasText(config.defaultColumn())) {
+            log.info("CSDN optional fields skipped: reason=no-config, durationMs={}", elapsed(startedAt));
+            return;
         }
-        if (StringUtils.hasText(config.defaultCategory())) {
-            browserAutomationService.fillFirstInPageOrFrames(page, List.of(
-                    "input[placeholder*='文章分类']",
-                    "input[placeholder*='分类']",
-                    "input[aria-label*='分类']",
-                    "[role='combobox'][aria-label*='分类']"
-            ), config.defaultCategory(), 1_500);
-        }
-        // CSDN 专栏入口在不同账号/编辑器版本中差异较大；仅在可见输入框存在时尝试填充。
-        if (StringUtils.hasText(config.defaultColumn())) {
-            browserAutomationService.fillFirstInPageOrFrames(page, List.of(
-                    "input[placeholder*='专栏']",
-                    "input[aria-label*='专栏']",
-                    "[role='combobox'][aria-label*='专栏']"
-            ), config.defaultColumn(), 1_500);
+        try {
+            browserAutomationService.fillTagLikeInputsWithin(page, config.defaultTags(), List.of(
+                    "input[placeholder*='文章标签']",
+                    "input[placeholder*='标签']",
+                    "input[aria-label*='标签']"
+            ), OPTIONAL_STRATEGY_TIMEOUT_MS, deadlineMs);
+            String summary = StringUtils.hasText(config.defaultSummary())
+                    ? config.defaultSummary()
+                    : normalize(context.summary(), "");
+            if (StringUtils.hasText(summary) && !optionalTimedOut(startedAt)) {
+                browserAutomationService.fillFirstInPageOrFramesWithin(page, List.of(
+                        "textarea[placeholder*='摘要']",
+                        "textarea[placeholder*='简介']",
+                        "textarea[placeholder*='描述']",
+                        "input[placeholder*='摘要']",
+                        "[aria-label*='摘要']"
+                ), summary, OPTIONAL_STRATEGY_TIMEOUT_MS, deadlineMs);
+            }
+            if (StringUtils.hasText(config.defaultCategory()) && !optionalTimedOut(startedAt)) {
+                browserAutomationService.fillFirstInPageOrFramesWithin(page, List.of(
+                        "input[placeholder*='文章分类']",
+                        "input[placeholder*='分类']",
+                        "input[aria-label*='分类']",
+                        "[role='combobox'][aria-label*='分类']"
+                ), config.defaultCategory(), OPTIONAL_STRATEGY_TIMEOUT_MS, deadlineMs);
+            }
+            if (StringUtils.hasText(config.defaultColumn()) && !optionalTimedOut(startedAt)) {
+                browserAutomationService.fillFirstInPageOrFramesWithin(page, List.of(
+                        "input[placeholder*='专栏']",
+                        "input[aria-label*='专栏']",
+                        "[role='combobox'][aria-label*='专栏']"
+                ), config.defaultColumn(), OPTIONAL_STRATEGY_TIMEOUT_MS, deadlineMs);
+            }
+            log.info("CSDN optional fields succeeded: durationMs={}", elapsed(startedAt));
+        } catch (RuntimeException exception) {
+            log.warn("CSDN optional fields failed: durationMs={}, reason={}", elapsed(startedAt), safeMessage(exception));
         }
     }
 
@@ -408,6 +488,55 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         return StringUtils.hasText(value) ? value : defaultValue;
     }
 
+    private FillOutcome titleSuccess(String strategy, long startedAt) {
+        log.info("CSDN title fill succeeded: strategy={}, durationMs={}", strategy, elapsed(startedAt));
+        return new FillOutcome(true, false, strategy);
+    }
+
+    private FillOutcome titleFailed(String strategy, long startedAt, boolean timedOut) {
+        log.warn("CSDN title fill failed: strategy={}, durationMs={}, timedOut={}", strategy, elapsed(startedAt), timedOut);
+        return new FillOutcome(false, timedOut, strategy);
+    }
+
+    private FillOutcome contentSuccess(String strategy, long startedAt) {
+        log.info("CSDN content fill succeeded: strategy={}, durationMs={}", strategy, elapsed(startedAt));
+        return new FillOutcome(true, false, strategy);
+    }
+
+    private FillOutcome contentFailed(String strategy, long startedAt) {
+        boolean timedOut = contentTimedOut(startedAt);
+        log.warn("CSDN content fill failed: strategy={}, durationMs={}, timedOut={}", strategy, elapsed(startedAt), timedOut);
+        return new FillOutcome(false, timedOut, strategy);
+    }
+
+    private boolean titleTimedOut(long startedAt) {
+        return elapsed(startedAt) >= TITLE_TOTAL_TIMEOUT_MS;
+    }
+
+    private boolean contentTimedOut(long startedAt) {
+        return elapsed(startedAt) >= CONTENT_TOTAL_TIMEOUT_MS;
+    }
+
+    private boolean optionalTimedOut(long startedAt) {
+        return elapsed(startedAt) >= OPTIONAL_TOTAL_TIMEOUT_MS;
+    }
+
+    private long elapsed(long startedAt) {
+        return System.currentTimeMillis() - startedAt;
+    }
+
+    private long nextStrategyDeadline(long totalDeadlineMs, long strategyBudgetMs) {
+        return Math.min(totalDeadlineMs, System.currentTimeMillis() + strategyBudgetMs);
+    }
+
+    private String preview(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String compact = value.replaceAll("\\s+", " ").trim();
+        return compact.length() > 20 ? compact.substring(0, 20) : compact;
+    }
+
     private void sleep(long millis) {
         try {
             Thread.sleep(millis);
@@ -424,5 +553,8 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         MARKDOWN,
         RICH_TEXT,
         UNKNOWN
+    }
+
+    private record FillOutcome(boolean success, boolean timedOut, String strategy) {
     }
 }

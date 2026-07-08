@@ -283,7 +283,7 @@ export default function Publish() {
       } else if (result.data.status === 'RUNNING' && result.data.platform === 'WECHAT_OFFICIAL' && result.data.externalPublishId) {
         message.info('已提交微信发布，等待平台确认');
       } else if (result.data.status === 'NEED_MANUAL_CONFIRM') {
-        message.info(result.data.errorMessage || '已自动填充，请到浏览器中确认发布');
+        message.info(result.data.errorMessage || '已自动填充，请在 Chrome for Testing 中检查并手动发布。');
       } else if (result.data.status === 'NEED_LOGIN') {
         message.warning(result.data.errorMessage || '需要登录后重新执行发布');
       } else if (result.data.status === 'NEED_CAPTCHA') {
@@ -377,6 +377,9 @@ export default function Publish() {
     if (record.status === 'RUNNING' && record.platform === 'WECHAT_OFFICIAL' && record.externalPublishId) {
       return { label: '微信确认中', color: 'blue' };
     }
+    if (record.status === 'RUNNING' && record.platform === 'CSDN') {
+      return { label: 'CSDN 自动化中', color: 'blue' };
+    }
     if (record.status === 'RUNNING') return { label: '发布中', color: 'blue' };
     if (record.articleStatus === 'PUBLISHED') return { label: '已发布', color: 'success' };
     if (record.articleStatus === 'REJECTED') return { label: '未通过', color: 'error' };
@@ -428,7 +431,7 @@ export default function Publish() {
   const handleViewManualConfirm = (record: PublishTask) => {
     Modal.info({
       title: '人工确认',
-      content: record.errorMessage || '已自动填充，请到浏览器中确认发布',
+      content: record.errorMessage || '已自动填充，请在 Chrome for Testing 中检查并手动发布。',
     });
   };
 
@@ -466,7 +469,7 @@ export default function Publish() {
     }
 
     if (record.status === 'RUNNING') {
-      return <Button size="small" disabled>发布中</Button>;
+      return <Button size="small" disabled>{record.platform === 'CSDN' ? 'CSDN 自动化中' : '发布中'}</Button>;
     }
 
     if (record.status === 'SUCCESS') {
@@ -558,11 +561,14 @@ export default function Publish() {
         if (record.status === 'RUNNING' && record.platform === 'WECHAT_OFFICIAL' && record.externalPublishId) {
           return <Typography.Text>微信发布确认中</Typography.Text>;
         }
+        if (record.status === 'RUNNING' && record.platform === 'CSDN') {
+          return <Typography.Text type="warning">CSDN 浏览器自动化执行中，请不要操作 Chrome for Testing 窗口。</Typography.Text>;
+        }
         if (record.status === 'NEED_MANUAL_CONFIRM') {
           return (
             <Space direction="vertical" size={2}>
               <Typography.Text type="warning" ellipsis={{ tooltip: record.errorMessage }}>
-                {record.errorMessage || '已自动填充，请到浏览器中确认发布'}
+                {record.errorMessage || '已自动填充，请在 Chrome for Testing 中检查并手动发布。'}
               </Typography.Text>
               {record.publishUrl ? (
                 <Typography.Link href={record.publishUrl} target="_blank" rel="noreferrer">

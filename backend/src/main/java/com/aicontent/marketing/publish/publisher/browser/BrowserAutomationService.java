@@ -242,6 +242,35 @@ public class BrowserAutomationService {
         return false;
     }
 
+    public boolean fillFirstInPageOrFramesWithin(Page page, List<String> selectors, String value, double timeoutMs, long deadlineMs) {
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        for (String selector : selectors) {
+            if (deadlineReached(deadlineMs)) {
+                return false;
+            }
+            if (tryFill(page, selector, value, boundedTimeout(timeoutMs, deadlineMs))) {
+                return true;
+            }
+        }
+        try {
+            for (Frame frame : page.frames()) {
+                for (String selector : selectors) {
+                    if (deadlineReached(deadlineMs)) {
+                        return false;
+                    }
+                    if (tryFill(frame, selector, value, boundedTimeout(timeoutMs, deadlineMs))) {
+                        return true;
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+        return false;
+    }
+
     public boolean clickAndTypeFirst(Page page, List<String> selectors, String value, double timeoutMs) {
         if (!StringUtils.hasText(value)) {
             return true;
@@ -269,6 +298,35 @@ public class BrowserAutomationService {
         return false;
     }
 
+    public boolean clickAndInsertFirstInPageOrFramesWithin(Page page, List<String> selectors, String value, double timeoutMs, long deadlineMs) {
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        for (String selector : selectors) {
+            if (deadlineReached(deadlineMs)) {
+                return false;
+            }
+            if (tryClickAndType(page, selector, value, boundedTimeout(timeoutMs, deadlineMs))) {
+                return true;
+            }
+        }
+        try {
+            for (Frame frame : page.frames()) {
+                for (String selector : selectors) {
+                    if (deadlineReached(deadlineMs)) {
+                        return false;
+                    }
+                    if (tryClickAndInsert(frame, selector, value, boundedTimeout(timeoutMs, deadlineMs))) {
+                        return true;
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+        return false;
+    }
+
     public boolean pasteFirstInPageOrFrames(Page page, List<String> selectors, String value, double timeoutMs) {
         if (!StringUtils.hasText(value)) {
             return true;
@@ -280,6 +338,35 @@ public class BrowserAutomationService {
             if (tryPaste(frame, selectors, value, timeoutMs)) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    public boolean pasteFirstInPageOrFramesWithin(Page page, List<String> selectors, String value, double timeoutMs, long deadlineMs) {
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        for (String selector : selectors) {
+            if (deadlineReached(deadlineMs)) {
+                return false;
+            }
+            if (tryPaste(page, selector, value, boundedTimeout(timeoutMs, deadlineMs))) {
+                return true;
+            }
+        }
+        try {
+            for (Frame frame : page.frames()) {
+                for (String selector : selectors) {
+                    if (deadlineReached(deadlineMs)) {
+                        return false;
+                    }
+                    if (tryPaste(frame, selector, value, boundedTimeout(timeoutMs, deadlineMs))) {
+                        return true;
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+            return false;
         }
         return false;
     }
@@ -355,6 +442,33 @@ public class BrowserAutomationService {
                 if (tryFillTagLike(frame, selector, values, timeoutMs)) {
                     return true;
                 }
+            }
+        }
+        return false;
+    }
+
+    public boolean fillTagLikeInputsWithin(Page page, List<String> values, List<String> selectors, double timeoutMs, long deadlineMs) {
+        if (values == null || values.isEmpty()) {
+            return true;
+        }
+        for (String selector : selectors) {
+            if (deadlineReached(deadlineMs)) {
+                return false;
+            }
+            if (tryFillTagLike(page, selector, values, boundedTimeout(timeoutMs, deadlineMs))) {
+                return true;
+            }
+            try {
+                for (Frame frame : page.frames()) {
+                    if (deadlineReached(deadlineMs)) {
+                        return false;
+                    }
+                    if (tryFillTagLike(frame, selector, values, boundedTimeout(timeoutMs, deadlineMs))) {
+                        return true;
+                    }
+                }
+            } catch (RuntimeException ignored) {
+                return false;
             }
         }
         return false;
@@ -440,6 +554,15 @@ public class BrowserAutomationService {
         }
     }
 
+    private boolean tryFill(Frame frame, String selector, String value, double timeoutMs) {
+        try {
+            frame.locator(selector).first().fill(value, new Locator.FillOptions().setTimeout(timeoutMs));
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
     private boolean tryFillFirst(Frame frame, List<String> selectors, String value, double timeoutMs) {
         for (String selector : selectors) {
             try {
@@ -495,6 +618,17 @@ public class BrowserAutomationService {
         return false;
     }
 
+    private boolean tryClickAndInsert(Frame frame, String selector, String value, double timeoutMs) {
+        try {
+            frame.locator(selector).first().click(new Locator.ClickOptions().setTimeout(timeoutMs));
+            frame.page().keyboard().press(selectAllShortcut());
+            frame.page().keyboard().insertText(value);
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
     private boolean tryPaste(Page page, List<String> selectors, String value, double timeoutMs) {
         for (String selector : selectors) {
             try {
@@ -509,6 +643,17 @@ public class BrowserAutomationService {
         return false;
     }
 
+    private boolean tryPaste(Page page, String selector, String value, double timeoutMs) {
+        try {
+            page.locator(selector).first().click(new Locator.ClickOptions().setTimeout(timeoutMs));
+            writeClipboard(page, value);
+            page.keyboard().press(pasteShortcut());
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
     private boolean tryPaste(Frame frame, List<String> selectors, String value, double timeoutMs) {
         for (String selector : selectors) {
             try {
@@ -521,6 +666,29 @@ public class BrowserAutomationService {
             }
         }
         return false;
+    }
+
+    private boolean tryPaste(Frame frame, String selector, String value, double timeoutMs) {
+        try {
+            frame.locator(selector).first().click(new Locator.ClickOptions().setTimeout(timeoutMs));
+            writeClipboard(frame.page(), value);
+            frame.page().keyboard().press(pasteShortcut());
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean deadlineReached(long deadlineMs) {
+        return System.currentTimeMillis() >= deadlineMs;
+    }
+
+    private double boundedTimeout(double timeoutMs, long deadlineMs) {
+        long remainingMs = deadlineMs - System.currentTimeMillis();
+        if (remainingMs <= 0) {
+            return 1;
+        }
+        return Math.max(1, Math.min(timeoutMs, remainingMs));
     }
 
     private boolean tryFillTagLike(Page page, String selector, List<String> values, double timeoutMs) {
