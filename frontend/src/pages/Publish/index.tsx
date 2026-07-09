@@ -48,6 +48,7 @@ import {
 import { formatFailure, getErrorText } from '../../utils/feedback';
 
 const CSDN_MANAGE_URL = 'https://mp.csdn.net/mp_blog/manage/article';
+const ZHIHU_MANAGE_URL = 'https://www.zhihu.com/creator';
 
 interface PublishTaskFormValues {
   articleId?: number;
@@ -281,7 +282,13 @@ export default function Publish() {
     try {
       const result = await executePublishTask(record.id);
       if (result.data.status === 'SUCCESS') {
-        message.success(record.platform === 'WECHAT_OFFICIAL' ? '公众号草稿创建成功' : '自动发布成功');
+        if (record.platform === 'WECHAT_OFFICIAL') {
+          message.success('公众号草稿创建成功');
+        } else if (record.platform === 'ZHIHU') {
+          message.success('知乎发布成功');
+        } else {
+          message.success('自动发布成功');
+        }
       } else if (result.data.status === 'RUNNING' && result.data.platform === 'WECHAT_OFFICIAL' && result.data.externalPublishId) {
         message.info('已提交微信发布，等待平台确认');
       } else if (result.data.status === 'NEED_MANUAL_CONFIRM') {
@@ -382,6 +389,9 @@ export default function Publish() {
     if (record.status === 'RUNNING' && record.platform === 'CSDN') {
       return { label: 'CSDN 自动化中', color: 'blue' };
     }
+    if (record.status === 'RUNNING' && record.platform === 'ZHIHU') {
+      return { label: '知乎自动化中', color: 'blue' };
+    }
     if (record.status === 'RUNNING') return { label: '发布中', color: 'blue' };
     if (record.articleStatus === 'PUBLISHED') return { label: '已发布', color: 'success' };
     if (record.articleStatus === 'REJECTED') return { label: '未通过', color: 'error' };
@@ -412,7 +422,16 @@ export default function Publish() {
     && url.includes('/article/details/'),
   );
 
-  const isOfficialArticleUrl = (url?: string) => isJuejinArticleUrl(url) || isCsdnArticleUrl(url);
+  const isZhihuArticleUrl = (url?: string) => Boolean(
+    url
+    && (
+      url.includes('zhuanlan.zhihu.com/p/')
+      || (url.includes('zhihu.com') && url.includes('/p/'))
+      || (url.includes('zhihu.com/question/') && url.includes('/answer/'))
+    ),
+  );
+
+  const isOfficialArticleUrl = (url?: string) => isJuejinArticleUrl(url) || isCsdnArticleUrl(url) || isZhihuArticleUrl(url);
 
   const isWechatDraftUrl = (url?: string) => Boolean(url?.startsWith('wechat-draft:'));
 
@@ -424,6 +443,13 @@ export default function Publish() {
         ? record.publishUrl
         : CSDN_MANAGE_URL;
       window.open(url || CSDN_MANAGE_URL, '_blank', 'noreferrer');
+      return;
+    }
+    if (record.platform === 'ZHIHU') {
+      const url = isZhihuArticleUrl(record.publishUrl)
+        ? record.publishUrl
+        : ZHIHU_MANAGE_URL;
+      window.open(url || ZHIHU_MANAGE_URL, '_blank', 'noreferrer');
       return;
     }
     const url = record.publishUrl || record.draftUrl;
@@ -441,7 +467,11 @@ export default function Publish() {
   const handleViewFailure = (record: PublishTask) => {
     Modal.error({
       title: '失败原因',
-      content: record.errorMessage || getPublishTaskStatusLabel(record.status) || '暂无失败原因',
+      content: (
+        <Typography.Text style={{ whiteSpace: 'pre-wrap' }}>
+          {record.errorMessage || getPublishTaskStatusLabel(record.status) || '暂无失败原因'}
+        </Typography.Text>
+      ),
     });
   };
 
@@ -486,14 +516,19 @@ export default function Publish() {
     }
 
     if (record.status === 'RUNNING') {
-      return <Button size="small" disabled>{record.platform === 'CSDN' ? 'CSDN 自动化中' : '发布中'}</Button>;
+      if (record.platform === 'CSDN') return <Button size="small" disabled>CSDN 自动化中</Button>;
+      if (record.platform === 'ZHIHU') return <Button size="small" disabled>知乎自动化中</Button>;
+      return <Button size="small" disabled>发布中</Button>;
     }
 
     if (record.status === 'SUCCESS') {
-      return <Button size="small" type={record.platform === 'CSDN' ? 'primary' : 'default'} onClick={() => handleViewResult(record)}>查看文章</Button>;
+      return <Button size="small" type={record.platform === 'CSDN' || record.platform === 'ZHIHU' ? 'primary' : 'default'} onClick={() => handleViewResult(record)}>查看文章</Button>;
     }
 
     if (record.status === 'NEED_MANUAL_CONFIRM') {
+      if (record.platform === 'ZHIHU') {
+        return <Button size="small" type="primary" onClick={() => handleViewResult(record)}>查看文章</Button>;
+      }
       if (record.platform === 'CSDN') {
         return <Button size="small" type="primary" onClick={() => handleViewResult(record)}>查看文章</Button>;
       }
@@ -564,6 +599,13 @@ export default function Publish() {
       responsive: ['lg'],
       render: (_, record) => {
         if (record.status === 'SUCCESS' && isOfficialArticleUrl(record.publishUrl)) {
+          if (record.platform === 'ZHIHU') {
+            return (
+              <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+                <Typography.Text type="success">知乎发布成功</Typography.Text>
+              </Space>
+            );
+          }
           if (record.platform === 'CSDN') {
             return (
               <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
@@ -572,6 +614,16 @@ export default function Publish() {
             );
           }
           return <Typography.Link href={record.publishUrl} target="_blank" rel="noreferrer">查看文章</Typography.Link>;
+        }
+        if (record.status === 'SUCCESS' && record.platform === 'ZHIHU') {
+          return (
+            <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+              <Typography.Text type="success">知乎发布成功</Typography.Text>
+              {!isZhihuArticleUrl(record.publishUrl) ? (
+                <Typography.Text type="secondary">未自动获取正式文章链接，请在知乎创作中心查看。</Typography.Text>
+              ) : null}
+            </Space>
+          );
         }
         if (record.status === 'SUCCESS' && record.platform === 'CSDN') {
           return (
@@ -597,7 +649,23 @@ export default function Publish() {
             </Space>
           );
         }
+        if (record.status === 'RUNNING' && record.platform === 'ZHIHU') {
+          return (
+            <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+              <Typography.Text type="warning">知乎浏览器自动化执行中</Typography.Text>
+              <Typography.Text type="secondary">请不要操作 Chrome for Testing 窗口。</Typography.Text>
+            </Space>
+          );
+        }
         if (record.status === 'NEED_MANUAL_CONFIRM') {
+          if (record.platform === 'ZHIHU') {
+            return (
+              <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+                <Typography.Text type="warning">已自动填充知乎编辑器</Typography.Text>
+                <Typography.Text type="secondary">请切换到 Chrome for Testing 窗口检查并手动发布。</Typography.Text>
+              </Space>
+            );
+          }
           if (record.platform === 'CSDN') {
             return (
               <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
@@ -621,6 +689,32 @@ export default function Publish() {
           );
         }
         if (isFailureStatus(record.status)) {
+          if (record.platform === 'ZHIHU') {
+            if (record.status === 'NEED_LOGIN') {
+              return (
+                <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+                  <Typography.Text type="danger">知乎登录状态失效</Typography.Text>
+                  <Typography.Text type="secondary">请在打开的浏览器中完成登录后重新执行发布任务。</Typography.Text>
+                </Space>
+              );
+            }
+            if (record.status === 'NEED_CAPTCHA') {
+              return (
+                <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+                  <Typography.Text type="danger">知乎需要验证码或安全验证</Typography.Text>
+                  <Typography.Text type="secondary">请人工处理后重新执行。</Typography.Text>
+                </Space>
+              );
+            }
+            return (
+              <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+                <Typography.Text type="danger">知乎发布失败</Typography.Text>
+                <Typography.Text type="secondary" style={{ whiteSpace: 'pre-wrap' }}>
+                  {record.errorMessage || getPublishTaskStatusLabel(record.status) || '请查看失败原因'}
+                </Typography.Text>
+              </Space>
+            );
+          }
           if (record.platform === 'CSDN') {
             return (
               <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>

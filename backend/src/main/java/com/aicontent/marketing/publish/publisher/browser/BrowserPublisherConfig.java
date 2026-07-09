@@ -12,6 +12,7 @@ public record BrowserPublisherConfig(
         String browserUserDataDir,
         String editorUrl,
         List<String> defaultTags,
+        List<String> defaultTopics,
         String defaultCategory,
         String defaultColumn,
         String defaultSummary,
@@ -19,7 +20,8 @@ public record BrowserPublisherConfig(
         boolean autoPublish,
         String manageUrl,
         boolean headless,
-        double timeoutMs
+        double timeoutMs,
+        double waitAfterFillMs
 ) {
 
     public static BrowserPublisherConfig parse(String rawConfig, ObjectMapper objectMapper, String defaultEditorUrl) {
@@ -36,6 +38,7 @@ public record BrowserPublisherConfig(
                     text(root, "browserUserDataDir", null),
                     text(root, "editorUrl", defaultEditorUrl),
                     stringList(root.path("defaultTags")),
+                    stringList(root.path("defaultTopics")),
                     text(root, "defaultCategory", ""),
                     text(root, "defaultColumn", ""),
                     text(root, "defaultSummary", ""),
@@ -43,7 +46,8 @@ public record BrowserPublisherConfig(
                     bool(root, "autoPublish", false),
                     text(root, "manageUrl", defaultManageUrl),
                     bool(root, "headless", false),
-                    number(root, "timeoutMs", 30_000)
+                    number(root, "timeoutMs", 30_000),
+                    number(root, "waitAfterFillMs", 1_000)
             );
             config.validate();
             return config;
