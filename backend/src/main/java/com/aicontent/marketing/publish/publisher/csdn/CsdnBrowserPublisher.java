@@ -147,6 +147,16 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             "[aria-label*='简介']",
             "[aria-label*='摘要']"
     );
+    private static final List<String> CSDN_RECOMMENDED_TAG_FALLBACKS = List.of(
+            "Java",
+            "前端",
+            "编程语言",
+            "开发工具",
+            "经验分享",
+            "程序人生",
+            "后端",
+            "数据结构与算法"
+    );
 
     private final BrowserAutomationService browserAutomationService;
     private final ObjectMapper objectMapper;
@@ -411,27 +421,21 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         }
         log.info("CSDN tag input opened: durationMs={}", elapsed(startedAt));
         log.info("CSDN tag popup opened: durationMs={}", elapsed(startedAt));
+        List<String> selectedTags = new ArrayList<>();
         for (String tag : normalizedTags) {
-            try {
-                page.keyboard().insertText(tag);
-                log.info("CSDN tag typed: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
-                sleep(300);
-                page.keyboard().press("Enter");
-                log.info("CSDN tag enter pressed: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
-                sleep(300);
-                if (!verifyTagChipInMainModal(page, tag) && selectTagCandidate(page, tag)) {
-                    log.info("CSDN tag candidate clicked: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
-                    sleep(300);
-                }
-                if (verifyTagChipInMainModal(page, tag)) {
-                    log.info("CSDN tag chip verified: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
-                }
-                sleep(300);
-            } catch (RuntimeException exception) {
-                log.warn("CSDN tag fill failed: reason={}, durationMs={}", safeMessage(exception), elapsed(startedAt));
-                return false;
+            if (selectPublishTag(page, tag, startedAt, false)) {
+                selectedTags.add(tag);
             }
         }
+        if (selectedTags.isEmpty()) {
+            for (String fallbackTag : CSDN_RECOMMENDED_TAG_FALLBACKS) {
+                if (selectPublishTag(page, fallbackTag, startedAt, true)) {
+                    selectedTags.add(fallbackTag);
+                    break;
+                }
+            }
+        }
+        log.info("CSDN tag selected count={}", selectedTags.size());
         closeTagPopup(page);
         boolean popupClosed = !publishTagPopupVisible(page);
         if (popupClosed) {
@@ -439,15 +443,25 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         } else {
             log.warn("CSDN tag popup still visible after close attempt: durationMs={}", elapsed(startedAt));
         }
-        boolean filled = verifyTagsInMainModal(page, normalizedTags);
-        if (filled) {
-            log.info("CSDN tag fill succeeded: tagCount={}, durationMs={}", normalizedTags.size(), elapsed(startedAt));
-            log.info("CSDN tag main modal verification succeeded: tagCount={}, durationMs={}", normalizedTags.size(), elapsed(startedAt));
-        } else {
-            log.warn("CSDN tag fill failed: reason=verify-failed, tagCount={}, durationMs={}", normalizedTags.size(), elapsed(startedAt));
+        boolean mainModalVerified = verifyTagsInMainModal(page, selectedTags);
+        if (selectedTags.isEmpty()) {
+            log.warn("CSDN tag fill failed: reason=no-selected-tags, tagCount={}, durationMs={}", normalizedTags.size(), elapsed(startedAt));
             log.warn("CSDN tag main modal verification failed: tagCount={}, durationMs={}", normalizedTags.size(), elapsed(startedAt));
+            return false;
         }
-        return filled;
+        if (mainModalVerified) {
+            log.info("CSDN tag main modal verification succeeded: selectedTagCount={}, durationMs={}", selectedTags.size(), elapsed(startedAt));
+        } else {
+            log.warn("CSDN tag main modal verification failed: selectedTagCount={}, durationMs={}", selectedTags.size(), elapsed(startedAt));
+        }
+        String validationError = visiblePublishValidationError(page);
+        if (StringUtils.hasText(validationError) && validationError.contains("标签")) {
+            log.warn("CSDN tag fill failed: reason={}, selectedTagCount={}, durationMs={}",
+                    validationError, selectedTags.size(), elapsed(startedAt));
+            return false;
+        }
+        log.info("CSDN tag fill succeeded: selectedTagCount={}, durationMs={}", selectedTags.size(), elapsed(startedAt));
+        return true;
     }
 
     private boolean openTagInput(Page page) {
@@ -484,7 +498,86 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         }
     }
 
-    private boolean selectTagCandidate(Page page, String tag) {
+    private boolean selectPublishTag(Page page, String tag, long startedAt, boolean fallbackRecommended) {
+        try {
+            clearTagInput(page);
+            log.info("CSDN tag input cleared: durationMs={}", elapsed(startedAt));
+            page.keyboard().insertText(tag);
+            log.info("CSDN tag typed: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
+            sleep(500);
+            TagCandidateClickResult candidateResult = clickTagCandidate(page, tag);
+            log.info("CSDN tag candidates found: count={}", candidateResult.count());
+            if (candidateResult.clicked()) {
+                log.info("CSDN tag candidate clicked: matched={}, tagLength={}, durationMs={}",
+                        candidateResult.matched(), tag.length(), elapsed(startedAt));
+                if (fallbackRecommended) {
+                    log.info("CSDN tag fallback recommended clicked: tagLength={}, durationMs={}",
+                            tag.length(), elapsed(startedAt));
+                }
+                sleep(500);
+            }
+            if (verifyTagChip(page, tag)) {
+                log.info("CSDN tag chip verified: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
+                return true;
+            }
+            page.keyboard().press("Enter");
+            log.info("CSDN tag enter pressed: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
+            sleep(500);
+            if (verifyTagChip(page, tag)) {
+                log.info("CSDN tag chip verified: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
+                return true;
+            }
+            return false;
+        } catch (RuntimeException exception) {
+            log.warn("CSDN tag select failed: reason={}, tagLength={}, durationMs={}",
+                    safeMessage(exception), tag.length(), elapsed(startedAt));
+            return false;
+        }
+    }
+
+    private void clearTagInput(Page page) {
+        try {
+            page.evaluate("""
+                    () => {
+                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                      };
+                      const roots = Array.from(document.querySelectorAll('[role="dialog"], [role="listbox"], [class*="dropdown"], [class*="popover"], [class*="suggest"], [class*="recommend"]'))
+                        .filter(root => visible(root) && /标签|推荐|添加/.test(text(root.innerText || root.textContent || '')));
+                      roots.push(document.body);
+                      const inputs = roots.flatMap(root => Array.from(root.querySelectorAll('input, textarea, [contenteditable="true"]')))
+                        .filter(visible);
+                      const input = inputs.find(element => {
+                        const hint = [
+                          element.getAttribute('placeholder') || '',
+                          element.getAttribute('aria-label') || '',
+                          text(element.closest('div, section, label')?.innerText || '')
+                        ].join(' ');
+                        return hint.includes('标签') || hint.includes('请输入') || element === document.activeElement;
+                      }) || inputs[0];
+                      if (!input) return false;
+                      input.focus();
+                      if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+                        const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                        const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                        setter?.call(input, '');
+                      } else {
+                        input.textContent = '';
+                      }
+                      input.dispatchEvent(new Event('input', { bubbles: true }));
+                      input.dispatchEvent(new Event('change', { bubbles: true }));
+                      return true;
+                    }
+                    """);
+        } catch (RuntimeException ignored) {
+            // Best effort; keyboard input may still target the already focused field.
+        }
+    }
+
+    private TagCandidateClickResult clickTagCandidate(Page page, String tag) {
         try {
             Object selected = page.evaluate("""
                     tag => {
@@ -494,23 +587,88 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                         const style = window.getComputedStyle(element);
                         return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
                       };
-                      const candidates = Array.from(document.querySelectorAll('[role="option"], li, .ant-select-item, [class*="option"], [class*="dropdown"] *'))
+                      const inSelectablePopup = element => element.closest('[role="listbox"], [class*="dropdown"], [class*="popover"], [class*="suggest"], [class*="recommend"], [class*="tag"]');
+                      const candidateElements = Array.from(document.querySelectorAll('[role="option"], li, button, span, div, .ant-select-item, [class*="option"], [class*="tag"]'))
                         .filter(element => visible(element))
-                        .filter(element => text(element.innerText || element.textContent || '').includes(tag));
-                      const candidate = candidates[0];
-                      if (!candidate) return false;
-                      candidate.click();
-                      return true;
+                        .filter(element => inSelectablePopup(element))
+                        .filter(element => !['INPUT', 'TEXTAREA'].includes(element.tagName))
+                        .map(element => ({ element, label: text(element.innerText || element.textContent || '') }))
+                        .filter(item => item.label
+                          && item.label.length <= 40
+                          && !item.label.includes('添加文章标签')
+                          && !item.label.includes('已添加')
+                          && !item.label.includes('已选'));
+                      const exact = candidateElements.find(item => item.label === tag);
+                      const close = candidateElements.find(item => item.label.includes(tag) || tag.includes(item.label));
+                      const candidate = exact || close;
+                      if (!candidate) return { count: candidateElements.length, clicked: false, matched: false };
+                      candidate.element.scrollIntoView({ block: 'center', inline: 'center' });
+                      candidate.element.click();
+                      return { count: candidateElements.length, clicked: true, matched: candidate === exact };
                     }
                     """, tag);
-            return Boolean.TRUE.equals(selected);
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> result = (java.util.Map<String, Object>) selected;
+            return new TagCandidateClickResult(
+                    numberValue(result.get("count")),
+                    Boolean.TRUE.equals(result.get("clicked")),
+                    Boolean.TRUE.equals(result.get("matched"))
+            );
         } catch (RuntimeException ignored) {
-            return false;
+            return new TagCandidateClickResult(0, false, false);
         }
+    }
+
+    private boolean verifyTagChip(Page page, String tag) {
+        return verifyTagChipInPopup(page, tag) || verifyTagChipInMainModal(page, tag);
     }
 
     private boolean verifyTagChipInMainModal(Page page, String tag) {
         return verifyTagsInMainModal(page, List.of(tag));
+    }
+
+    private boolean verifyTagChipInPopup(Page page, String tag) {
+        try {
+            Object verified = page.evaluate("""
+                    tag => {
+                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                      };
+                      const hasCloseIcon = element => {
+                        const root = element.closest('li, button, span, div') || element;
+                        const snapshot = text(root.innerText || root.textContent || '');
+                        const ariaClose = Array.from(root.querySelectorAll('[aria-label], button, i, svg, span'))
+                          .some(item => /关闭|删除|移除|close|delete|remove|×|x/i.test(text(item.getAttribute('aria-label') || item.innerText || item.textContent || '')));
+                        return ariaClose || /×|x/.test(snapshot);
+                      };
+                      const inRecommendOnlyArea = element => {
+                        let current = element.closest('li, div, section, ul');
+                        for (let depth = 0; current && depth < 4; depth += 1, current = current.parentElement?.closest?.('li, div, section, ul')) {
+                          const snapshot = text(current.innerText || current.textContent || '');
+                          if ((snapshot.includes('已选') || snapshot.includes('已添加') || snapshot.includes('添加标签')) && snapshot.includes(tag)) return false;
+                          if ((snapshot.includes('推荐标签') || snapshot.includes('推荐')) && snapshot.includes(tag)) return true;
+                        }
+                        return false;
+                      };
+                      const roots = Array.from(document.querySelectorAll('[role="dialog"], [class*="popover"], [class*="dropdown"], [class*="tag"]'))
+                        .filter(root => visible(root) && /添加标签|已选|已添加|文章标签/.test(text(root.innerText || root.textContent || '')));
+                      return roots.some(root => {
+                        const rootText = text(root.innerText || root.textContent || '');
+                        const looksSelectedArea = /添加标签|已选|已添加/.test(rootText) && !/推荐标签\\s*$/.test(rootText);
+                        const exactNodes = Array.from(root.querySelectorAll('span, div, li, button'))
+                          .filter(visible)
+                          .filter(element => text(element.innerText || element.textContent || '') === tag);
+                        return exactNodes.some(element => !inRecommendOnlyArea(element) && (looksSelectedArea || hasCloseIcon(element)));
+                      });
+                    }
+                    """, tag);
+            return Boolean.TRUE.equals(verified);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private boolean verifyTagsInMainModal(Page page, List<String> tags) {
@@ -2204,6 +2362,9 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         private static PublishConfirmOutcome clicked(long finalClickedAtMs) {
             return new PublishConfirmOutcome(null, finalClickedAtMs);
         }
+    }
+
+    private record TagCandidateClickResult(int count, boolean clicked, boolean matched) {
     }
 
     private record LoginDetection(boolean required, String reason) {
