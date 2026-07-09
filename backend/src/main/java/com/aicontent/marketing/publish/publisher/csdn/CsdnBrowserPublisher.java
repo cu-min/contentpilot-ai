@@ -191,8 +191,9 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                     config.timeoutMs()
             ));
             Page page = resolveMarkdownPage(session, config.timeoutMs());
-            if (isLoginPage(page)) {
-                return PublishResult.needLogin(currentOrConfiguredUrl(page, config), "CSDN 未检测到登录态，请在打开的浏览器中完成登录后重新执行发布任务");
+            LoginDetection loginDetection = detectCsdnLoginRequired(page);
+            if (loginDetection.required()) {
+                return needLoginResult(page, config, loginDetection.reason(), "CSDN 未检测到登录态，请在打开的浏览器中完成登录后重新执行发布任务");
             }
 
             EditorType editorType = detectEditorType(page);
@@ -210,8 +211,9 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             log.info("CSDN markdown page selected: taskId={}, url={}", context.taskId(), safeUrl(page));
 
             if (!waitForMarkdownEditorReady(page, config.timeoutMs())) {
-                if (isLoginPage(page) || browserAutomationService.looksLoggedOut(page)) {
-                    return PublishResult.needLogin(currentOrConfiguredUrl(page, config), "CSDN 未检测到登录态，请在打开的浏览器中完成登录后重新执行发布任务");
+                loginDetection = detectCsdnLoginRequired(page);
+                if (loginDetection.required()) {
+                    return needLoginResult(page, config, loginDetection.reason(), "CSDN 未检测到登录态，请在打开的浏览器中完成登录后重新执行发布任务");
                 }
                 if (browserAutomationService.looksCaptchaBlocked(page)) {
                     return PublishResult.needCaptcha(currentOrConfiguredUrl(page, config), "CSDN 页面需要人工完成验证码或安全验证后重新执行发布任务");
@@ -269,9 +271,12 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     private PublishResult autoPublish(PublishContext context, Page page, BrowserPublisherConfig config) {
         long startedAt = System.currentTimeMillis();
         log.info("CSDN publish click started: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
-        if (isLoginPage(page) || browserAutomationService.looksLoggedOut(page)) {
-            log.warn("CSDN publish result login: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
-            return PublishResult.needLogin(currentOrConfiguredUrl(page, config), "CSDN 登录态失效，请在打开的浏览器中完成登录后重新执行发布任务");
+        EditorPublishState editorState = detectEditorPublishState(page);
+        log.info("CSDN publish editor state: taskId={}, editorUrl={}, publishButtonVisible={}, saveDraftButtonVisible={}, avatarVisible={}",
+                context.taskId(), editorState.editorUrl(), editorState.publishButtonVisible(), editorState.saveDraftButtonVisible(), editorState.avatarVisible());
+        LoginDetection loginDetection = detectCsdnLoginRequired(page);
+        if (loginDetection.required() && !editorState.readyToPublish()) {
+            return needLoginResult(page, config, loginDetection.reason(), "CSDN 登录状态失效，请在打开的浏览器中完成登录后重新执行发布任务");
         }
         if (browserAutomationService.looksCaptchaBlocked(page)) {
             log.warn("CSDN publish result captcha: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
@@ -283,7 +288,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         }
         if (!clickPublishButton(page)) {
             log.warn("CSDN publish result failed: taskId={}, reason=button-not-found, durationMs={}", context.taskId(), elapsed(startedAt));
-            return PublishResult.failed("CSDN 发布失败：未找到“发布文章”按钮");
+            return PublishResult.failed("CSDN 发布失败：未找到发布文章按钮");
         }
         PublishResult dialogResult = handlePublishDialogAndConfirm(page, context, config);
         if (dialogResult != null) {
@@ -674,9 +679,9 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         long deadline = System.currentTimeMillis() + PUBLISH_RESULT_TIMEOUT_MS;
         boolean triedManagePage = false;
         while (System.currentTimeMillis() < deadline) {
-            if (isLoginPage(page) || browserAutomationService.looksLoggedOut(page)) {
-                log.warn("CSDN publish result login: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
-                return PublishResult.needLogin(currentOrConfiguredUrl(page, config), "CSDN 登录态失效，请在打开的浏览器中完成登录后重新执行发布任务");
+            LoginDetection loginDetection = detectCsdnLoginRequired(page);
+            if (loginDetection.required()) {
+                return needLoginResult(page, config, loginDetection.reason(), "CSDN 登录状态失效，请在打开的浏览器中完成登录后重新执行发布任务");
             }
             if (browserAutomationService.looksCaptchaBlocked(page)) {
                 log.warn("CSDN publish result captcha: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
@@ -1329,9 +1334,119 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         return EditorType.UNKNOWN;
     }
 
-    private boolean isLoginPage(Page page) {
+    private LoginDetection detectCsdnLoginRequired(Page page) {
         String url = browserAutomationService.currentUrl(page);
-        return StringUtils.hasText(url) && url.contains("passport.csdn.net/login");
+        if (StringUtils.hasText(url)) {
+            if (url.contains("passport.csdn.net")) {
+                return new LoginDetection(true, "url-passport");
+            }
+            if (url.contains("csdn.net") && url.contains("/login")) {
+                return new LoginDetection(true, "url-login");
+            }
+        }
+        String reason = visibleLoginReason(page);
+        return StringUtils.hasText(reason)
+                ? new LoginDetection(true, reason)
+                : new LoginDetection(false, "");
+    }
+
+    private PublishResult needLoginResult(Page page, BrowserPublisherConfig config, String reason, String message) {
+        log.warn("CSDN login required detected: reason={}, currentUrl={}", reason, safeUrl(page));
+        return PublishResult.needLogin(currentOrConfiguredUrl(page, config), message);
+    }
+
+    private String visibleLoginReason(Page page) {
+        try {
+            Object reason = page.evaluate("""
+                    () => {
+                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const visible = element => {
+                        if (!element || element.closest('script, style, template') || element.getAttribute('aria-hidden') === 'true') return false;
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
+                      };
+                      const expiredPhrases = ['登录态失效', '请重新登录', '登录已过期', '账号登录已过期', '请先登录后再操作'];
+                      const roots = Array.from(document.querySelectorAll([
+                        '[role="dialog"]',
+                        '[role="alert"]',
+                        '.modal',
+                        '.ant-modal',
+                        '[class*="modal"]',
+                        '[class*="dialog"]',
+                        '[class*="toast"]',
+                        '[class*="message"]',
+                        '[class*="alert"]',
+                        '[class*="login"]',
+                        '[class*="passport"]'
+                      ].join(','))).filter(visible);
+                      const toastOrModal = roots.find(root => {
+                        const snapshot = text(root.innerText || root.textContent || '');
+                        return snapshot && expiredPhrases.some(phrase => snapshot.includes(phrase));
+                      });
+                      if (toastOrModal) {
+                        const className = String(toastOrModal.className || '');
+                        return /toast|message|alert/i.test(className) || toastOrModal.getAttribute('role') === 'alert'
+                          ? 'login-expired-toast'
+                          : 'login-expired-text-visible';
+                      }
+                      const loginModal = roots.find(root => {
+                        const snapshot = text(root.innerText || root.textContent || '');
+                        if (!snapshot || snapshot.length > 1000) return false;
+                        const hasLoginCombo = ['账号登录', '手机号登录', '微信登录', '验证码登录', '登录/注册', '登录注册']
+                          .some(phrase => snapshot.includes(phrase));
+                        const hasLoginAction = Array.from(root.querySelectorAll('button, a')).some(element => {
+                          const label = text(element.innerText || element.textContent || element.getAttribute('aria-label') || '');
+                          return visible(element) && (label === '登录' || label === '登录/注册');
+                        });
+                        return hasLoginCombo && hasLoginAction;
+                      });
+                      if (loginModal) return 'login-modal-visible';
+                      return '';
+                    }
+                    """);
+            return reason instanceof String text ? text : "";
+        } catch (RuntimeException ignored) {
+            return "";
+        }
+    }
+
+    private EditorPublishState detectEditorPublishState(Page page) {
+        boolean editorUrl = isMarkdownEditorPage(page);
+        try {
+            Object value = page.evaluate("""
+                    () => {
+                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const visible = element => {
+                        if (!element || element.closest('script, style, template') || element.getAttribute('aria-hidden') === 'true') return false;
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
+                      };
+                      const controls = Array.from(document.querySelectorAll('button, a, span, div')).filter(visible);
+                      const publishButtonVisible = controls.some(element => text(element.innerText || element.textContent) === '发布文章');
+                      const saveDraftButtonVisible = controls.some(element => text(element.innerText || element.textContent).includes('保存草稿'));
+                      const avatarVisible = Array.from(document.querySelectorAll([
+                        'img[src*="avatar"]',
+                        'img[class*="avatar"]',
+                        '[class*="avatar"] img',
+                        '[class*="user"] img',
+                        '[class*="profile"] img'
+                      ].join(','))).some(visible);
+                      return { publishButtonVisible, saveDraftButtonVisible, avatarVisible };
+                    }
+                    """);
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> state = (java.util.Map<String, Object>) value;
+            return new EditorPublishState(
+                    editorUrl,
+                    Boolean.TRUE.equals(state.get("publishButtonVisible")),
+                    Boolean.TRUE.equals(state.get("saveDraftButtonVisible")),
+                    Boolean.TRUE.equals(state.get("avatarVisible"))
+            );
+        } catch (RuntimeException exception) {
+            return new EditorPublishState(editorUrl, false, false, false);
+        }
     }
 
     private boolean titleFilled(Page page, String title) {
@@ -1835,5 +1950,14 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     }
 
     private record FillOutcome(boolean success, boolean timedOut, String strategy) {
+    }
+
+    private record LoginDetection(boolean required, String reason) {
+    }
+
+    private record EditorPublishState(boolean editorUrl, boolean publishButtonVisible, boolean saveDraftButtonVisible, boolean avatarVisible) {
+        private boolean readyToPublish() {
+            return editorUrl && publishButtonVisible && (avatarVisible || saveDraftButtonVisible);
+        }
     }
 }
