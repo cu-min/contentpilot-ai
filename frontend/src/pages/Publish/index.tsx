@@ -568,9 +568,6 @@ export default function Publish() {
             return (
               <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
                 <Typography.Text type="success">CSDN 发布成功</Typography.Text>
-                <Typography.Link href={record.publishUrl} target="_blank" rel="noreferrer">
-                  查看文章
-                </Typography.Link>
               </Space>
             );
           }
@@ -583,9 +580,6 @@ export default function Publish() {
               {!isCsdnArticleUrl(record.publishUrl) ? (
                 <Typography.Text type="secondary">未自动获取正式文章链接，请在 CSDN 内容管理页查看。</Typography.Text>
               ) : null}
-              <Typography.Link href={isCsdnArticleUrl(record.publishUrl) ? record.publishUrl : CSDN_MANAGE_URL} target="_blank" rel="noreferrer">
-                查看文章
-              </Typography.Link>
             </Space>
           );
         }
