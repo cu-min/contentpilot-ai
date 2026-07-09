@@ -424,6 +424,8 @@ export default function Publish() {
 
   const isZhihuArticleUrl = (url?: string) => Boolean(
     url
+    && !url.includes('/edit')
+    && !url.includes('/write')
     && (
       url.includes('zhuanlan.zhihu.com/p/')
       || (url.includes('zhihu.com') && url.includes('/p/'))
