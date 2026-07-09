@@ -8,6 +8,7 @@ import com.aicontent.marketing.publish.publisher.browser.BrowserAutomationReques
 import com.aicontent.marketing.publish.publisher.browser.BrowserAutomationService;
 import com.aicontent.marketing.publish.publisher.browser.BrowserAutomationSession;
 import com.aicontent.marketing.publish.publisher.browser.BrowserPublisherConfig;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
@@ -48,7 +49,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     private static final long OPTIONAL_TOTAL_TIMEOUT_MS = 5_000;
     private static final double OPTIONAL_STRATEGY_TIMEOUT_MS = 800;
     private static final long PUBLISH_RESULT_TIMEOUT_MS = 45_000;
-    private static final long PUBLISH_CONFIRM_TIMEOUT_MS = 8_000;
+    private static final long PUBLISH_DIALOG_TIMEOUT_MS = 10_000;
     private static final Pattern VERIFY_TEXT_FRAGMENT_PATTERN = Pattern.compile("[\\p{IsHan}A-Za-z0-9]{6,}");
     private static final List<String> TITLE_VALUE_SELECTORS = List.of(
             "input[placeholder*='请输入文章标题']",
@@ -130,13 +131,6 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             "text=发布文章",
             "button:has-text('立即发布')",
             "text=立即发布",
-            "button:has-text('发布')"
-    );
-    private static final List<String> FINAL_CONFIRM_SELECTORS = List.of(
-            "button:has-text('确认发布')",
-            "button:has-text('提交发布')",
-            "button:has-text('立即发布')",
-            "button:has-text('发布文章')",
             "button:has-text('发布')"
     );
     private static final List<String> PUBLISH_SUMMARY_SELECTORS = List.of(
@@ -291,7 +285,11 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             log.warn("CSDN publish result failed: taskId={}, reason=button-not-found, durationMs={}", context.taskId(), elapsed(startedAt));
             return PublishResult.failed("CSDN 发布失败：未找到“发布文章”按钮");
         }
-        handlePublishConfirmations(page, context, config);
+        PublishResult dialogResult = handlePublishDialogAndConfirm(page, context, config);
+        if (dialogResult != null) {
+            logPublishResult(context, dialogResult);
+            return dialogResult;
+        }
         log.info("CSDN publish result check started: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
         PublishResult result = waitForPublishResult(page, context, config, startedAt);
         logPublishResult(context, result);
@@ -318,39 +316,358 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         return clicked;
     }
 
-    private void handlePublishConfirmations(Page page, PublishContext context, BrowserPublisherConfig config) {
-        long deadline = System.currentTimeMillis() + PUBLISH_CONFIRM_TIMEOUT_MS;
-        while (System.currentTimeMillis() < deadline) {
-            if (isLoginPage(page) || browserAutomationService.looksCaptchaBlocked(page)) {
-                return;
-            }
-            fillOptionalMetadata(page, context, config);
-            fillPublishDialogRequiredFields(page, context, config);
-            if (browserAutomationService.clickFirstInPageOrFrames(page, FINAL_CONFIRM_SELECTORS, 1_000)) {
-                log.info("CSDN publish button clicked: stage=final-confirm, currentUrl={}", safeUrl(page));
-                sleep(1_000);
-                continue;
-            }
-            sleep(500);
-        }
-    }
-
-    private void fillPublishDialogRequiredFields(Page page, PublishContext context, BrowserPublisherConfig config) {
+    private PublishResult handlePublishDialogAndConfirm(Page page, PublishContext context, BrowserPublisherConfig config) {
         long startedAt = System.currentTimeMillis();
-        String summary = resolvePublishSummary(context, config);
-        boolean summaryFilled = false;
-        if (StringUtils.hasText(summary)) {
-            summaryFilled = browserAutomationService.fillFirstInPageOrFramesWithin(
-                    page,
-                    PUBLISH_SUMMARY_SELECTORS,
-                    summary,
-                    OPTIONAL_STRATEGY_TIMEOUT_MS,
-                    System.currentTimeMillis() + 1_500
-            );
+        if (!waitForPublishDialog(page)) {
+            log.warn("CSDN publish result failed reason=publish-dialog-not-found durationMs={}", elapsed(startedAt));
+            return PublishResult.failed("CSDN 发布失败：未检测到发布弹窗");
         }
+        log.info("CSDN publish dialog detected: durationMs={}", elapsed(startedAt));
+        List<String> tags = resolvePublishTags(context, config);
+        boolean tagsFilled = fillPublishTags(page, tags);
+        if (!tagsFilled) {
+            log.warn("CSDN publish result failed reason=tag-fill-failed durationMs={}", elapsed(startedAt));
+            return PublishResult.failed("CSDN 发布失败：文章标签未填写");
+        }
+        String summary = resolvePublishSummary(context, config);
+        boolean summaryFilled = fillPublishSummary(page, summary);
+        if (!summaryFilled) {
+            log.warn("CSDN publish result failed reason=summary-fill-failed durationMs={}", elapsed(startedAt));
+            return PublishResult.failed("CSDN 发布失败：文章摘要未填写");
+        }
+        fillPublishOptionalCategory(page, config);
         boolean originalChecked = checkOriginalStatement(page);
         log.info("CSDN publish dialog required fields handled: summaryFilled={}, originalChecked={}, summaryLength={}, durationMs={}",
                 summaryFilled, originalChecked, summary.length(), elapsed(startedAt));
+        if (!clickFinalPublishButton(page)) {
+            log.warn("CSDN publish result failed reason=final-button-not-found durationMs={}", elapsed(startedAt));
+            return PublishResult.failed("CSDN 发布失败：未找到最终确认发布按钮");
+        }
+        return null;
+    }
+
+    private boolean waitForPublishDialog(Page page) {
+        long deadline = System.currentTimeMillis() + PUBLISH_DIALOG_TIMEOUT_MS;
+        while (System.currentTimeMillis() < deadline) {
+            if (publishDialogDetected(page)) {
+                return true;
+            }
+            sleep(300);
+        }
+        return false;
+    }
+
+    private boolean publishDialogDetected(Page page) {
+        try {
+            Object detected = page.evaluate("""
+                    () => {
+                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                      };
+                      const roots = Array.from(document.querySelectorAll('[role="dialog"], .modal, .ant-modal, [class*="modal"], [class*="dialog"]'));
+                      roots.push(document.body);
+                      return roots.some(root => {
+                        if (!root || !visible(root)) return false;
+                        const snapshot = text(root.innerText || root.textContent || '');
+                        const hasFinalButton = Array.from(root.querySelectorAll('button')).some(button => text(button.innerText || button.textContent) === '发布文章');
+                        return snapshot.includes('发布文章')
+                          && snapshot.includes('文章标签')
+                          && snapshot.includes('文章摘要')
+                          && hasFinalButton;
+                      });
+                    }
+                    """);
+            return Boolean.TRUE.equals(detected);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean fillPublishTags(Page page, List<String> tags) {
+        long startedAt = System.currentTimeMillis();
+        List<String> normalizedTags = tags.stream()
+                .filter(StringUtils::hasText)
+                .map(tag -> trimToLength(tag, 20))
+                .distinct()
+                .limit(3)
+                .toList();
+        log.info("CSDN tag fill started: tagCount={}, tagLengths={}",
+                normalizedTags.size(), normalizedTags.stream().map(String::length).toList());
+        if (normalizedTags.isEmpty()) {
+            log.warn("CSDN tag fill failed: reason=no-tags, durationMs={}", elapsed(startedAt));
+            return false;
+        }
+        if (!openTagInput(page)) {
+            log.warn("CSDN tag fill failed: reason=input-not-opened, durationMs={}", elapsed(startedAt));
+            return false;
+        }
+        log.info("CSDN tag input opened: durationMs={}", elapsed(startedAt));
+        for (String tag : normalizedTags) {
+            try {
+                page.keyboard().insertText(tag);
+                sleep(300);
+                if (selectTagCandidate(page, tag)) {
+                    log.info("CSDN tag candidate selected: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
+                } else {
+                    page.keyboard().press("Enter");
+                    log.info("CSDN tag enter pressed: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
+                }
+                sleep(300);
+            } catch (RuntimeException exception) {
+                log.warn("CSDN tag fill failed: reason={}, durationMs={}", safeMessage(exception), elapsed(startedAt));
+                return false;
+            }
+        }
+        boolean filled = verifyTagsInDialog(page, normalizedTags);
+        if (filled) {
+            log.info("CSDN tag fill succeeded: tagCount={}, durationMs={}", normalizedTags.size(), elapsed(startedAt));
+        } else {
+            log.warn("CSDN tag fill failed: reason=verify-failed, tagCount={}, durationMs={}", normalizedTags.size(), elapsed(startedAt));
+        }
+        return filled;
+    }
+
+    private boolean openTagInput(Page page) {
+        try {
+            Object opened = page.evaluate("""
+                    () => {
+                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                      };
+                      const roots = Array.from(document.querySelectorAll('[role="dialog"], .modal, .ant-modal, [class*="modal"], [class*="dialog"]'));
+                      roots.push(document.body);
+                      const dialog = roots.find(root => visible(root) && text(root.innerText || root.textContent || '').includes('文章标签'));
+                      if (!dialog) return false;
+                      const controls = Array.from(dialog.querySelectorAll('button, span, div, a'));
+                      const add = controls.find(element => visible(element) && text(element.innerText || element.textContent || '').includes('添加文章标签'));
+                      if (add) {
+                        add.click();
+                        return true;
+                      }
+                      const input = dialog.querySelector('input, textarea, [contenteditable="true"]');
+                      if (input) {
+                        input.focus();
+                        return true;
+                      }
+                      return false;
+                    }
+                    """);
+            return Boolean.TRUE.equals(opened);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean selectTagCandidate(Page page, String tag) {
+        try {
+            Object selected = page.evaluate("""
+                    tag => {
+                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                      };
+                      const candidates = Array.from(document.querySelectorAll('[role="option"], li, .ant-select-item, [class*="option"], [class*="dropdown"] *'))
+                        .filter(element => visible(element))
+                        .filter(element => text(element.innerText || element.textContent || '').includes(tag));
+                      const candidate = candidates[0];
+                      if (!candidate) return false;
+                      candidate.click();
+                      return true;
+                    }
+                    """, tag);
+            return Boolean.TRUE.equals(selected);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean verifyTagsInDialog(Page page, List<String> tags) {
+        String snapshot = pageSnapshot(page);
+        return tags.stream().anyMatch(snapshot::contains);
+    }
+
+    private boolean fillPublishSummary(Page page, String summary) {
+        long startedAt = System.currentTimeMillis();
+        String normalizedSummary = trimToLength(summary, 200);
+        log.info("CSDN summary fill started: summaryLength={}", normalizedSummary.length());
+        if (!StringUtils.hasText(normalizedSummary)) {
+            log.warn("CSDN summary fill failed: reason=empty-summary, summaryFilled=false, durationMs={}", elapsed(startedAt));
+            return false;
+        }
+        boolean filled = fillSummaryByJs(page, normalizedSummary);
+        if (!filled) {
+            filled = browserAutomationService.fillFirstInPageOrFramesWithin(
+                    page,
+                    PUBLISH_SUMMARY_SELECTORS,
+                    normalizedSummary,
+                    OPTIONAL_STRATEGY_TIMEOUT_MS,
+                    System.currentTimeMillis() + 2_000
+            );
+        }
+        if (!filled) {
+            try {
+                page.keyboard().insertText(normalizedSummary);
+                filled = true;
+            } catch (RuntimeException ignored) {
+                filled = false;
+            }
+        }
+        sleep(300);
+        boolean verified = filled && verifySummaryFilled(page);
+        if (verified) {
+            log.info("CSDN summary fill succeeded: summaryLength={}, summaryFilled=true, durationMs={}",
+                    normalizedSummary.length(), elapsed(startedAt));
+        } else {
+            log.warn("CSDN summary fill failed: summaryLength={}, summaryFilled=false, durationMs={}",
+                    normalizedSummary.length(), elapsed(startedAt));
+        }
+        return verified;
+    }
+
+    private boolean fillSummaryByJs(Page page, String summary) {
+        try {
+            Object filled = page.evaluate("""
+                    summary => {
+                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                      };
+                      const roots = Array.from(document.querySelectorAll('[role="dialog"], .modal, .ant-modal, [class*="modal"], [class*="dialog"]'));
+                      roots.push(document.body);
+                      const dialog = roots.find(root => visible(root) && text(root.innerText || root.textContent || '').includes('文章摘要'));
+                      if (!dialog) return false;
+                      const candidates = Array.from(dialog.querySelectorAll('textarea, input, [contenteditable="true"]'))
+                        .filter(element => {
+                          const hint = [
+                            element.getAttribute('placeholder') || '',
+                            element.getAttribute('aria-label') || '',
+                            text(element.closest('label, div, section')?.innerText || '')
+                          ].join(' ');
+                          return hint.includes('本内容会在各展现列表中展示') || hint.includes('文章摘要') || hint.includes('摘要');
+                        });
+                      const element = candidates[0];
+                      if (!element) return false;
+                      element.focus();
+                      if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+                        const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                        const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                        setter?.call(element, summary);
+                      } else {
+                        element.textContent = summary;
+                      }
+                      element.dispatchEvent(new Event('input', { bubbles: true }));
+                      element.dispatchEvent(new Event('change', { bubbles: true }));
+                      return true;
+                    }
+                    """, summary);
+            return Boolean.TRUE.equals(filled);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean verifySummaryFilled(Page page) {
+        try {
+            Object verified = page.evaluate("""
+                    () => {
+                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                      };
+                      const roots = Array.from(document.querySelectorAll('[role="dialog"], .modal, .ant-modal, [class*="modal"], [class*="dialog"]'));
+                      roots.push(document.body);
+                      const dialog = roots.find(root => visible(root) && text(root.innerText || root.textContent || '').includes('文章摘要'));
+                      if (!dialog) return false;
+                      const candidates = Array.from(dialog.querySelectorAll('textarea, input, [contenteditable="true"]'));
+                      return candidates.some(element => {
+                        const hint = [
+                          element.getAttribute('placeholder') || '',
+                          element.getAttribute('aria-label') || '',
+                          text(element.closest('label, div, section')?.innerText || '')
+                        ].join(' ');
+                        const looksSummary = hint.includes('本内容会在各展现列表中展示') || hint.includes('文章摘要') || hint.includes('摘要');
+                        const value = text(element.value || element.textContent || element.innerText || '');
+                        return looksSummary && value.length > 0;
+                      }) || /[1-9][0-9]*\\s*\\/\\s*256/.test(text(dialog.innerText || dialog.textContent || ''));
+                    }
+                    """);
+            return Boolean.TRUE.equals(verified);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private void fillPublishOptionalCategory(Page page, BrowserPublisherConfig config) {
+        if (!StringUtils.hasText(config.defaultCategory()) && !StringUtils.hasText(config.defaultColumn())) {
+            return;
+        }
+        try {
+            browserAutomationService.fillFirstInPageOrFramesWithin(page, List.of(
+                    "input[placeholder*='分类专栏']",
+                    "input[placeholder*='分类']",
+                    "input[placeholder*='专栏']",
+                    "[role='combobox'][aria-label*='分类']",
+                    "[role='combobox'][aria-label*='专栏']"
+            ), StringUtils.hasText(config.defaultCategory()) ? config.defaultCategory() : config.defaultColumn(), OPTIONAL_STRATEGY_TIMEOUT_MS,
+                    System.currentTimeMillis() + 1_500);
+        } catch (RuntimeException ignored) {
+            // Category/column is optional unless CSDN explicitly reports it as required.
+        }
+    }
+
+    private boolean clickFinalPublishButton(Page page) {
+        long startedAt = System.currentTimeMillis();
+        log.info("CSDN final publish confirm started");
+        try {
+            Object clicked = page.evaluate("""
+                    () => {
+                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                      };
+                      const roots = Array.from(document.querySelectorAll('[role="dialog"], .modal, .ant-modal, [class*="modal"], [class*="dialog"]'));
+                      roots.push(document.body);
+                      const dialog = roots.find(root => visible(root) && text(root.innerText || root.textContent || '').includes('文章标签'));
+                      if (!dialog) return { found: false, clicked: false };
+                      const buttons = Array.from(dialog.querySelectorAll('button'))
+                        .filter(button => visible(button))
+                        .filter(button => text(button.innerText || button.textContent) === '发布文章');
+                      const button = buttons[buttons.length - 1];
+                      if (!button) return { found: false, clicked: false };
+                      button.scrollIntoView({ block: 'center', inline: 'center' });
+                      button.click();
+                      return { found: true, clicked: true };
+                    }
+                    """);
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> result = (java.util.Map<String, Object>) clicked;
+            boolean found = Boolean.TRUE.equals(result.get("found"));
+            boolean clickedButton = Boolean.TRUE.equals(result.get("clicked"));
+            if (found) {
+                log.info("CSDN final publish button found: durationMs={}", elapsed(startedAt));
+            }
+            if (clickedButton) {
+                log.info("CSDN final publish confirm clicked: durationMs={}", elapsed(startedAt));
+            }
+            return clickedButton;
+        } catch (RuntimeException exception) {
+            log.warn("CSDN final publish confirm failed: reason={}, durationMs={}", safeMessage(exception), elapsed(startedAt));
+            return false;
+        }
     }
 
     private PublishResult waitForPublishResult(Page page, PublishContext context, BrowserPublisherConfig config, long startedAt) {
@@ -374,18 +691,18 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             }
             String articleUrl = extractArticleUrl(page, context.title());
             if (isCsdnArticleUrl(articleUrl)) {
-                log.info("CSDN publish result success: taskId={}, durationMs={}, publishUrl={}",
+                log.info("CSDN publish result success by article url: taskId={}, durationMs={}, publishUrl={}",
                         context.taskId(), elapsed(startedAt), articleUrl);
                 return PublishResult.success(articleUrl, "CSDN 发布成功");
             }
             if (isCsdnArticleUrl(currentUrl)) {
-                log.info("CSDN publish result success: taskId={}, durationMs={}, publishUrl={}",
+                log.info("CSDN publish result success by article url: taskId={}, durationMs={}, publishUrl={}",
                         context.taskId(), elapsed(startedAt), currentUrl);
                 return PublishResult.success(currentUrl, "CSDN 发布成功");
             }
             if (looksReviewing(snapshot)) {
                 String publishUrl = StringUtils.hasText(articleUrl) ? articleUrl : fallbackManageUrl(config);
-                log.info("CSDN publish result success: taskId={}, state=reviewing, durationMs={}, publishUrl={}",
+                log.info("CSDN publish result success text: taskId={}, state=reviewing, durationMs={}, publishUrl={}",
                         context.taskId(), elapsed(startedAt), publishUrl);
                 return PublishResult.success(publishUrl, "已提交 CSDN，当前审核中");
             }
@@ -394,7 +711,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                 String message = isCsdnArticleUrl(publishUrl)
                         ? "CSDN 发布成功"
                         : "CSDN 发布成功，但未自动获取正式文章链接，请在内容管理页查看";
-                log.info("CSDN publish result success: taskId={}, durationMs={}, publishUrl={}",
+                log.info("CSDN publish result success text: taskId={}, durationMs={}, publishUrl={}",
                         context.taskId(), elapsed(startedAt), publishUrl);
                 return PublishResult.success(publishUrl, message);
             }
@@ -413,7 +730,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                 String message = isCsdnArticleUrl(publishUrl)
                         ? "CSDN 发布成功"
                         : "CSDN 发布成功，但未自动获取正式文章链接，请在内容管理页查看";
-                log.info("CSDN publish result success: taskId={}, stage=manage-title-match, durationMs={}, publishUrl={}",
+                log.info("CSDN publish result success by manage page match: taskId={}, durationMs={}, publishUrl={}",
                         context.taskId(), elapsed(startedAt), publishUrl);
                 return PublishResult.success(publishUrl, message);
             }
@@ -1130,13 +1447,93 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     }
 
     private String resolvePublishSummary(PublishContext context, BrowserPublisherConfig config) {
-        if (StringUtils.hasText(config.defaultSummary())) {
-            return trimToLength(config.defaultSummary(), 180);
-        }
         if (StringUtils.hasText(context.summary())) {
             return trimToLength(context.summary(), 180);
         }
+        if (StringUtils.hasText(config.defaultSummary())) {
+            return trimToLength(config.defaultSummary(), 180);
+        }
         return trimToLength(stripMarkdown(context.content()), 180);
+    }
+
+    private List<String> resolvePublishTags(PublishContext context, BrowserPublisherConfig config) {
+        List<String> result = new ArrayList<>();
+        appendTags(result, config.defaultTags());
+        if (result.isEmpty()) {
+            appendTags(result, parseTagText(context.tags()));
+        }
+        if (result.isEmpty()) {
+            appendTags(result, parseTagText(context.keywords()));
+        }
+        if (result.isEmpty()) {
+            appendTags(result, fallbackTagsFromTitle(context.title()));
+        }
+        return result.stream()
+                .filter(StringUtils::hasText)
+                .map(tag -> trimToLength(tag.trim(), 20))
+                .distinct()
+                .limit(3)
+                .toList();
+    }
+
+    private void appendTags(List<String> target, List<String> tags) {
+        if (tags == null) {
+            return;
+        }
+        tags.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .filter(tag -> !target.contains(tag))
+                .forEach(target::add);
+    }
+
+    private List<String> parseTagText(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return List.of();
+        }
+        String trimmed = raw.trim();
+        if (trimmed.startsWith("[")) {
+            try {
+                JsonNode node = objectMapper.readTree(trimmed);
+                if (node.isArray()) {
+                    List<String> tags = new ArrayList<>();
+                    node.forEach(item -> {
+                        if (item.isTextual() && StringUtils.hasText(item.asText())) {
+                            tags.add(item.asText());
+                        }
+                    });
+                    return tags;
+                }
+            } catch (RuntimeException ignored) {
+                // Fall through to separator parsing.
+            } catch (Exception ignored) {
+                // Fall through to separator parsing.
+            }
+        }
+        return List.of(trimmed.split("[,，;；、\\s]+")).stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .toList();
+    }
+
+    private List<String> fallbackTagsFromTitle(String title) {
+        if (!StringUtils.hasText(title)) {
+            return List.of("技术");
+        }
+        String cleaned = title.replaceAll("[^\\p{IsHan}A-Za-z0-9]+", " ").trim();
+        List<String> tokens = new ArrayList<>();
+        for (String token : cleaned.split("\\s+")) {
+            if (StringUtils.hasText(token) && token.length() >= 2) {
+                tokens.add(token);
+            }
+            if (tokens.size() >= 3) {
+                break;
+            }
+        }
+        if (!tokens.isEmpty()) {
+            return tokens;
+        }
+        return List.of(trimToLength(title.trim(), 12));
     }
 
     private boolean checkOriginalStatement(Page page) {
@@ -1202,7 +1599,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     }
 
     private boolean looksPublishSucceeded(String snapshot) {
-        return containsAnyText(snapshot, List.of("发布成功", "已发布", "文章已发布", "提交成功", "内容管理"));
+        return containsAnyText(snapshot, List.of("发布成功", "已发布", "文章已发布", "提交成功"));
     }
 
     private boolean looksReviewing(String snapshot) {
@@ -1258,10 +1655,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                           href: link.href || '',
                           text: normalize(link.innerText || link.textContent || '')
                         }))
-                        .filter(item => item.href.includes('csdn.net') && (
-                          item.href.includes('/article/details/')
-                          || item.href.includes('blog.csdn.net')
-                        ));
+                        .filter(item => item.href.includes('csdn.net') && item.href.includes('/article/details/'));
                       const exact = candidates.find(item => titleText && item.text.includes(titleText));
                       return (exact || candidates[0] || {}).href || '';
                     }
@@ -1275,7 +1669,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     private boolean isCsdnArticleUrl(String url) {
         return StringUtils.hasText(url)
                 && url.contains("csdn.net")
-                && (url.contains("/article/details/") || url.contains("blog.csdn.net"));
+                && url.contains("/article/details/");
     }
 
     private void navigateToManagePage(Page page, BrowserPublisherConfig config) {

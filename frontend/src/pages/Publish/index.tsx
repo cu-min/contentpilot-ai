@@ -409,14 +409,10 @@ export default function Publish() {
   const isCsdnArticleUrl = (url?: string) => Boolean(
     url
     && url.includes('csdn.net')
-    && (url.includes('/article/details/') || url.includes('blog.csdn.net')),
+    && url.includes('/article/details/'),
   );
 
   const isOfficialArticleUrl = (url?: string) => isJuejinArticleUrl(url) || isCsdnArticleUrl(url);
-
-  const isCsdnManageUrl = (url?: string) => Boolean(url?.includes('mp.csdn.net/mp_blog/manage/article'));
-
-  const isCsdnEditorUrl = (url?: string) => Boolean(url?.includes('editor.csdn.net/md'));
 
   const isWechatDraftUrl = (url?: string) => Boolean(url?.startsWith('wechat-draft:'));
 
@@ -424,7 +420,7 @@ export default function Publish() {
 
   const handleViewResult = (record: PublishTask) => {
     if (record.platform === 'CSDN') {
-      const url = record.publishUrl && !isCsdnEditorUrl(record.publishUrl)
+      const url = isCsdnArticleUrl(record.publishUrl)
         ? record.publishUrl
         : CSDN_MANAGE_URL;
       window.open(url || CSDN_MANAGE_URL, '_blank', 'noreferrer');
@@ -584,10 +580,10 @@ export default function Publish() {
           return (
             <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
               <Typography.Text type="success">CSDN 发布成功</Typography.Text>
-              {isCsdnManageUrl(record.publishUrl) || !record.publishUrl ? (
+              {!isCsdnArticleUrl(record.publishUrl) ? (
                 <Typography.Text type="secondary">未自动获取正式文章链接，请在 CSDN 内容管理页查看。</Typography.Text>
               ) : null}
-              <Typography.Link href={record.publishUrl || CSDN_MANAGE_URL} target="_blank" rel="noreferrer">
+              <Typography.Link href={isCsdnArticleUrl(record.publishUrl) ? record.publishUrl : CSDN_MANAGE_URL} target="_blank" rel="noreferrer">
                 查看文章
               </Typography.Link>
             </Space>
@@ -600,7 +596,12 @@ export default function Publish() {
           return <Typography.Text>微信发布确认中</Typography.Text>;
         }
         if (record.status === 'RUNNING' && record.platform === 'CSDN') {
-          return <Typography.Text type="warning">CSDN 浏览器自动化执行中，请不要操作 Chrome for Testing 窗口。</Typography.Text>;
+          return (
+            <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+              <Typography.Text type="warning">CSDN 浏览器自动化执行中</Typography.Text>
+              <Typography.Text type="secondary">请不要操作 Chrome for Testing 窗口。</Typography.Text>
+            </Space>
+          );
         }
         if (record.status === 'NEED_MANUAL_CONFIRM') {
           if (record.platform === 'CSDN') {
@@ -626,6 +627,14 @@ export default function Publish() {
           );
         }
         if (isFailureStatus(record.status)) {
+          if (record.platform === 'CSDN') {
+            return (
+              <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+                <Typography.Text type="danger">CSDN 发布失败</Typography.Text>
+                <Typography.Text type="secondary">{record.errorMessage || getPublishTaskStatusLabel(record.status) || '请查看失败原因'}</Typography.Text>
+              </Space>
+            );
+          }
           return (
             <Typography.Text type="danger" ellipsis={{ tooltip: record.errorMessage }}>
               {record.errorMessage || getPublishTaskStatusLabel(record.status) || '执行失败'}
