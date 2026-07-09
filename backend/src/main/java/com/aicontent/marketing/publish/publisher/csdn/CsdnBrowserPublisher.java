@@ -9,6 +9,7 @@ import com.aicontent.marketing.publish.publisher.browser.BrowserAutomationServic
 import com.aicontent.marketing.publish.publisher.browser.BrowserAutomationSession;
 import com.aicontent.marketing.publish.publisher.browser.BrowserPublisherConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.WaitUntilState;
 import org.slf4j.Logger;
@@ -59,6 +60,15 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             "[contenteditable='true'][aria-label*='标题']",
             "[role='textbox'][aria-label*='标题']",
             "#txtTitle"
+    );
+    private static final List<String> TITLE_DIRECT_INPUT_SELECTORS = List.of(
+            "input[placeholder*='请输入文章标题']",
+            "textarea[placeholder*='请输入文章标题']"
+    );
+    private static final List<String> TITLE_HIDDEN_INPUT_SELECTORS = List.of(
+            "input.article-bar__title-input",
+            "input[placeholder*='请输入文章标题']",
+            "input.article-bar__title"
     );
     private static final List<String> TITLE_CLICK_SELECTORS = List.of(
             "text=【无标题】",
@@ -222,10 +232,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             FillOutcome titleOutcome = fillTitle(page, context.title());
             if (!titleOutcome.success()) {
                 logTitleCandidates(page, editorType);
-                String message = titleOutcome.timedOut()
-                        ? "CSDN Markdown 标题填充超时"
-                        : "CSDN Markdown 标题填充失败，请人工检查页面结构";
-                return PublishResult.failed(message);
+                return PublishResult.failed("CSDN Markdown 标题填充失败，未能激活标题区域");
             }
             FillOutcome contentOutcome = fillContent(page, context.content());
             if (!contentOutcome.success()) {
@@ -463,37 +470,342 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         int candidateCount = browserAutomationService.elementSummaries(page, TITLE_CLICK_SELECTORS, 20).size();
         log.info("CSDN title fill started: url={}, editorType={}, candidateCount={}, titleLength={}",
                 safeUrl(page), detectEditorType(page), candidateCount, normalizedTitle.length());
-        if (browserAutomationService.fillFirstInPageOrFramesWithin(page, TITLE_VALUE_SELECTORS, normalizedTitle,
-                TITLE_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, TITLE_STRATEGY_BUDGET_MS))
-                && titleFilled(page, normalizedTitle)) {
-            return titleSuccess("fill", startedAt);
+        if (runTitleStrategy(page, normalizedTitle, "hidden-title-input-js-setter", startedAt, deadlineMs,
+                () -> setHiddenTitleInputByJs(page, normalizedTitle))) {
+            return titleSuccess("hidden-title-input-js-setter", startedAt);
         }
-        if (titleTimedOut(startedAt)) {
-            return titleFailed("fill", startedAt, true);
+        if (runTitleStrategy(page, normalizedTitle, "direct-input-fill", startedAt, deadlineMs,
+                () -> directInputFill(page, normalizedTitle, nextStrategyDeadline(deadlineMs, TITLE_STRATEGY_BUDGET_MS)))) {
+            return titleSuccess("direct-input-fill", startedAt);
         }
-        if (browserAutomationService.clickAndInsertFirstInPageOrFramesWithin(page, TITLE_CLICK_SELECTORS, normalizedTitle,
-                TITLE_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, TITLE_STRATEGY_BUDGET_MS))
-                && titleFilled(page, normalizedTitle)) {
-            return titleSuccess("click-insert", startedAt);
+        if (runTitleStrategy(page, normalizedTitle, "click-active-insert", startedAt, deadlineMs,
+                () -> clickDirectInputAndInsert(page, normalizedTitle, nextStrategyDeadline(deadlineMs, TITLE_STRATEGY_BUDGET_MS)))) {
+            return titleSuccess("click-active-insert", startedAt);
         }
-        if (titleTimedOut(startedAt)) {
-            return titleFailed("click-insert", startedAt, true);
+        if (runTitleStrategy(page, normalizedTitle, "input-click-paste", startedAt, deadlineMs,
+                () -> clickDirectInputAndPaste(page, normalizedTitle, nextStrategyDeadline(deadlineMs, TITLE_STRATEGY_BUDGET_MS)))) {
+            return titleSuccess("input-click-paste", startedAt);
         }
-        boolean pasted = browserAutomationService.pasteFirstInPageOrFramesWithin(page, TITLE_CLICK_SELECTORS, normalizedTitle,
-                TITLE_STRATEGY_TIMEOUT_MS, nextStrategyDeadline(deadlineMs, TITLE_STRATEGY_BUDGET_MS))
-                && titleFilled(page, normalizedTitle);
-        if (pasted) {
-            return titleSuccess("paste", startedAt);
+        if (runTitleStrategy(page, normalizedTitle, "input-js-setter", startedAt, deadlineMs,
+                () -> setTitleByJs(page, normalizedTitle))) {
+            return titleSuccess("input-js-setter", startedAt);
         }
-        if (titleTimedOut(startedAt)) {
-            return titleFailed("paste", startedAt, true);
+        if (runTitleStrategy(page, normalizedTitle, "coordinate-active-insert", startedAt, deadlineMs,
+                () -> coordinateTitleAndInsert(page, normalizedTitle))) {
+            return titleSuccess("coordinate-active-insert", startedAt);
         }
-        boolean coordinateInserted = browserAutomationService.clickAtAndInsert(page, 300, 135, normalizedTitle)
-                && titleFilled(page, normalizedTitle);
-        if (coordinateInserted) {
-            return titleSuccess("coordinate-insert", startedAt);
+        return titleFailed("all-strategies", startedAt, titleTimedOut(startedAt));
+    }
+
+    private boolean runTitleStrategy(Page page, String title, String strategy, long startedAt, long deadlineMs, BooleanSupplier action) {
+        if (System.currentTimeMillis() >= deadlineMs) {
+            log.warn("CSDN title fill strategy timeout: strategy={}, durationMs={}", strategy, elapsed(startedAt));
+            return false;
         }
-        return titleFailed("coordinate-insert", startedAt, titleTimedOut(startedAt));
+        log.info("CSDN title fill strategy started: strategy={}, durationMs={}", strategy, elapsed(startedAt));
+        boolean attempted;
+        try {
+            attempted = action.getAsBoolean();
+        } catch (RuntimeException exception) {
+            log.warn("CSDN title fill strategy failed: strategy={}, durationMs={}, reason={}",
+                    strategy, elapsed(startedAt), safeMessage(exception));
+            return false;
+        }
+        if (System.currentTimeMillis() >= deadlineMs) {
+            log.warn("CSDN title fill strategy timeout: strategy={}, durationMs={}", strategy, elapsed(startedAt));
+            return false;
+        }
+        if (attempted && titleFilled(page, title)) {
+            log.info("CSDN title fill strategy succeeded: strategy={}, durationMs={}", strategy, elapsed(startedAt));
+            return true;
+        }
+        log.warn("CSDN title fill strategy failed: strategy={}, attempted={}, durationMs={}",
+                strategy, attempted, elapsed(startedAt));
+        return false;
+    }
+
+    private boolean setHiddenTitleInputByJs(Page page, String title) {
+        try {
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> result = (java.util.Map<String, Object>) page.evaluate("""
+                    title => {
+                      const selectors = [
+                        "input.article-bar__title-input",
+                        "input[placeholder*='请输入文章标题']",
+                        "input.article-bar__title"
+                      ];
+                      const findInput = () => {
+                        for (const selector of selectors) {
+                          const input = document.querySelector(selector);
+                          if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+                            return input;
+                          }
+                        }
+                        return null;
+                      };
+                      const dispatchTitleEvents = input => {
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                        input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Process', code: 'Unidentified' }));
+                      };
+                      const setNativeValue = input => {
+                        input.focus();
+                        const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                        const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                        if (!setter) return false;
+                        setter.call(input, title);
+                        dispatchTitleEvents(input);
+                        input.blur();
+                        return true;
+                      };
+                      const verify = input => {
+                        const bodyText = document.body?.innerText || '';
+                        const counterText = Array.from(document.querySelectorAll('body *'))
+                          .map(element => element.innerText || element.textContent || '')
+                          .find(text => text && text.includes(`/${100}`) && text.includes(String(title.length))) || '';
+                        return input.value === title || bodyText.includes(title) || Boolean(counterText);
+                      };
+                      const input = findInput();
+                      if (!input) {
+                        return { found: false, valueLength: 0, verified: false };
+                      }
+                      let setOk = setNativeValue(input);
+                      let verified = verify(input);
+                      if (!verified) {
+                        const previousDisplay = input.style.display;
+                        const previousAriaHidden = input.getAttribute('aria-hidden');
+                        input.style.display = 'block';
+                        input.removeAttribute('aria-hidden');
+                        setOk = setNativeValue(input) || setOk;
+                        verified = verify(input);
+                        input.style.display = previousDisplay;
+                        if (previousAriaHidden === null) {
+                          input.removeAttribute('aria-hidden');
+                        } else {
+                          input.setAttribute('aria-hidden', previousAriaHidden);
+                        }
+                      }
+                      return {
+                        found: true,
+                        setOk,
+                        valueLength: (input.value || '').length,
+                        verified
+                      };
+                    }
+                    """, title);
+            boolean found = Boolean.TRUE.equals(result.get("found"));
+            boolean verified = Boolean.TRUE.equals(result.get("verified"));
+            Object valueLength = result.get("valueLength");
+            log.info("CSDN hidden-title-input-js-setter result: hiddenInputFound={}, valueLength={}, titleVerifyResult={}",
+                    found, valueLength, verified);
+            return found && (verified || title.length() == numberValue(valueLength));
+        } catch (RuntimeException exception) {
+            log.warn("CSDN hidden-title-input-js-setter failed: reason={}", safeMessage(exception));
+            return false;
+        }
+    }
+
+    private boolean directInputFill(Page page, String title, long deadlineMs) {
+        for (String selector : TITLE_DIRECT_INPUT_SELECTORS) {
+            if (System.currentTimeMillis() >= deadlineMs) {
+                return false;
+            }
+            try {
+                Locator locator = page.locator(selector).first();
+                locator.fill(title, new Locator.FillOptions().setTimeout(boundedTitleTimeout(deadlineMs)));
+                return true;
+            } catch (RuntimeException ignored) {
+                // Try the next direct title input.
+            }
+        }
+        return false;
+    }
+
+    private boolean clickDirectInputAndInsert(Page page, String title, long deadlineMs) {
+        for (String selector : TITLE_DIRECT_INPUT_SELECTORS) {
+            if (System.currentTimeMillis() >= deadlineMs) {
+                return false;
+            }
+            try {
+                Locator locator = page.locator(selector).first();
+                locator.click(new Locator.ClickOptions().setTimeout(boundedTitleTimeout(deadlineMs)));
+                page.keyboard().press(selectAllShortcut());
+                page.keyboard().insertText(title);
+                return true;
+            } catch (RuntimeException ignored) {
+                // Try the next direct title input.
+            }
+        }
+        return false;
+    }
+
+    private boolean clickDirectInputAndPaste(Page page, String title, long deadlineMs) {
+        for (String selector : TITLE_DIRECT_INPUT_SELECTORS) {
+            if (System.currentTimeMillis() >= deadlineMs) {
+                return false;
+            }
+            try {
+                Locator locator = page.locator(selector).first();
+                locator.click(new Locator.ClickOptions().setTimeout(boundedTitleTimeout(deadlineMs)));
+                writeClipboard(page, title);
+                page.keyboard().press(pasteShortcut());
+                return true;
+            } catch (RuntimeException ignored) {
+                // Try the next direct title input.
+            }
+        }
+        return false;
+    }
+
+    private boolean setTitleByJs(Page page, String title) {
+        Object filled = page.evaluate("""
+                title => {
+                  const visible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                  };
+                  const textOf = element => [
+                    element.getAttribute?.('placeholder') || '',
+                    element.getAttribute?.('aria-label') || '',
+                    element.getAttribute?.('title') || '',
+                    element.getAttribute?.('name') || '',
+                    element.id || '',
+                    element.innerText || '',
+                    element.textContent || ''
+                  ].join(' ');
+                  const looksTitle = element => /标题|请输入文章标题|无标题|title/i.test(textOf(element));
+                  const setNativeValue = (element, value) => {
+                    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+                      const prototype = element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+                      const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+                      element.focus();
+                      descriptor?.set?.call(element, value);
+                      element.dispatchEvent(new Event('input', { bubbles: true }));
+                      element.dispatchEvent(new Event('change', { bubbles: true }));
+                      return true;
+                    }
+                    if (element.isContentEditable || element.getAttribute('contenteditable') === 'true') {
+                      element.textContent = value;
+                      element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+                      element.dispatchEvent(new Event('change', { bubbles: true }));
+                      return true;
+                    }
+                    return false;
+                  };
+                  const selectors = [
+                    "input[placeholder*='请输入文章标题']",
+                    "textarea[placeholder*='请输入文章标题']",
+                    "input[placeholder*='标题']",
+                    "textarea[placeholder*='标题']",
+                    "input[name='title']",
+                    "[contenteditable='true'][placeholder*='请输入文章标题']",
+                    "[contenteditable='true'][aria-label*='标题']",
+                    "[role='textbox'][aria-label*='标题']",
+                    "#txtTitle"
+                  ];
+                  for (const selector of selectors) {
+                    for (const element of document.querySelectorAll(selector)) {
+                      if (visible(element) && looksTitle(element) && setNativeValue(element, title)) return true;
+                    }
+                  }
+                  return false;
+                }
+                """, title);
+        return Boolean.TRUE.equals(filled);
+    }
+
+    private boolean coordinateTitleAndInsert(Page page, String title) {
+        if (!clickTitleByCoordinate(page)) {
+            return false;
+        }
+        sleep(300);
+        if (!activeElementLooksTitle(page)) {
+            return false;
+        }
+        page.keyboard().press(selectAllShortcut());
+        page.keyboard().insertText(title);
+        return true;
+    }
+
+    private boolean clickTitleByCoordinate(Page page) {
+        try {
+            @SuppressWarnings("unchecked")
+            List<Number> point = (List<Number>) page.evaluate("""
+                    () => {
+                      const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                      };
+                      const textOf = element => [
+                        element.getAttribute?.('placeholder') || '',
+                        element.getAttribute?.('aria-label') || '',
+                        element.getAttribute?.('title') || '',
+                        element.innerText || '',
+                        element.textContent || ''
+                      ].join(' ').replace(/\\s+/g, ' ').trim();
+                      const candidates = Array.from(document.querySelectorAll('input, textarea, [contenteditable="true"], [role="textbox"], span, div, h1, p'))
+                        .filter(element => visible(element))
+                        .filter(element => /请输入文章标题|无标题|【无标题】|标题/.test(textOf(element)));
+                      const element = candidates[0];
+                      if (!element) return [];
+                      const rect = element.getBoundingClientRect();
+                      return [rect.left + rect.width / 2, rect.top + rect.height / 2];
+                    }
+                    """);
+            if (point == null || point.size() < 2) {
+                return false;
+            }
+            page.mouse().click(point.get(0).doubleValue(), point.get(1).doubleValue());
+            return true;
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    private boolean activeElementLooksTitle(Page page) {
+        try {
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> info = (java.util.Map<String, Object>) page.evaluate("""
+                    () => {
+                      const element = document.activeElement;
+                      const text = value => (value || '').toString().replace(/\\s+/g, ' ').trim().slice(0, 80);
+                      const tag = element?.tagName || '';
+                      const className = typeof element?.className === 'string' ? element.className : '';
+                      const placeholder = element?.getAttribute?.('placeholder') || '';
+                      const aria = element?.getAttribute?.('aria-label') || '';
+                      const role = element?.getAttribute?.('role') || '';
+                      const contenteditable = element?.getAttribute?.('contenteditable') || '';
+                      const name = element?.getAttribute?.('name') || '';
+                      const id = element?.id || '';
+                      const innerText = text(element?.innerText || element?.textContent || '');
+                      const value = text(element?.value || '');
+                      const combined = [tag, className, placeholder, aria, role, contenteditable, name, id, innerText, value].join(' ');
+                      const titleLike = /标题|请输入文章标题|title|无标题/i.test(combined);
+                      const editable = /INPUT|TEXTAREA/.test(tag) || contenteditable === 'true' || role === 'textbox' || element?.isContentEditable === true;
+                      const aiLike = /AI助手|ai-assistant|assistant/i.test(combined)
+                        || Boolean(element?.closest?.('[class*="ai"], [id*="ai"], [class*="assistant"], [id*="assistant"]'));
+                      return {
+                        tag,
+                        className: text(className).slice(0, 40),
+                        placeholder: text(placeholder),
+                        contenteditable,
+                        innerText,
+                        value,
+                        titleLike: Boolean(editable && titleLike && !aiLike)
+                      };
+                    }
+                    """);
+            boolean titleLike = Boolean.TRUE.equals(info.get("titleLike"));
+            log.info("CSDN title active element checked: tag={}, className={}, placeholder={}, contenteditable={}, titleLike={}, innerText={}, value={}",
+                    info.get("tag"), info.get("className"), info.get("placeholder"), info.get("contenteditable"),
+                    titleLike, info.get("innerText"), info.get("value"));
+            return titleLike;
+        } catch (RuntimeException exception) {
+            log.warn("CSDN title active element check failed: reason={}", safeMessage(exception));
+            return false;
+        }
     }
 
     private FillOutcome fillContent(Page page, String content) {
@@ -706,8 +1018,20 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
     }
 
     private boolean titleFilled(Page page, String title) {
-        return browserAutomationService.selectorsContainTextOrValue(page, TITLE_VALUE_SELECTORS, title)
-                || browserAutomationService.containsTextInPageOrFrames(page, title);
+        if (!StringUtils.hasText(title)) {
+            return true;
+        }
+        String snapshot = browserAutomationService.textSnapshot(page, titleSelectorsForSnapshot(), 4_000);
+        return snapshotContainsContent(snapshot, title);
+    }
+
+    private List<String> titleSelectorsForSnapshot() {
+        List<String> selectors = new ArrayList<>();
+        selectors.addAll(TITLE_VALUE_SELECTORS);
+        selectors.add("[class*='title']");
+        selectors.add("[id*='title']");
+        selectors.add("[placeholder*='标题']");
+        return selectors;
     }
 
     private boolean contentFilled(Page page, String content) {
@@ -1061,6 +1385,53 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
 
     private String safeMessage(RuntimeException exception) {
         return StringUtils.hasText(exception.getMessage()) ? exception.getMessage() : exception.getClass().getSimpleName();
+    }
+
+    private int numberValue(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text && StringUtils.hasText(text)) {
+            try {
+                return Integer.parseInt(text);
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    private double boundedTitleTimeout(long deadlineMs) {
+        long remainingMs = deadlineMs - System.currentTimeMillis();
+        if (remainingMs <= 0) {
+            return 1;
+        }
+        return Math.max(1, Math.min(TITLE_STRATEGY_TIMEOUT_MS, remainingMs));
+    }
+
+    private void writeClipboard(Page page, String value) {
+        page.evaluate("""
+                text => {
+                  try {
+                    return Promise.race([
+                      navigator.clipboard.writeText(text).then(() => true).catch(() => false),
+                      new Promise(resolve => setTimeout(() => resolve(false), 500))
+                    ]);
+                  } catch (e) {
+                    return false;
+                  }
+                }
+                """, value);
+    }
+
+    private String selectAllShortcut() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        return osName.contains("mac") ? "Meta+A" : "Control+A";
+    }
+
+    private String pasteShortcut() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        return osName.contains("mac") ? "Meta+V" : "Control+V";
     }
 
     private enum EditorType {
