@@ -423,12 +423,23 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         log.info("CSDN tag popup opened: durationMs={}", elapsed(startedAt));
         List<String> selectedTags = new ArrayList<>();
         for (String tag : normalizedTags) {
+            if (hasAnySelectedTagInMainModal(page)) {
+                selectedTags.add("selected");
+                log.info("CSDN tag chip verified: tagLength={}, durationMs={}", 0, elapsed(startedAt));
+                break;
+            }
             if (selectPublishTag(page, tag, startedAt, false)) {
                 selectedTags.add(tag);
+                break;
             }
         }
         if (selectedTags.isEmpty()) {
             for (String fallbackTag : CSDN_RECOMMENDED_TAG_FALLBACKS) {
+                if (hasAnySelectedTagInMainModal(page)) {
+                    selectedTags.add("selected");
+                    log.info("CSDN tag chip verified: tagLength={}, durationMs={}", 0, elapsed(startedAt));
+                    break;
+                }
                 if (selectPublishTag(page, fallbackTag, startedAt, true)) {
                     selectedTags.add(fallbackTag);
                     break;
@@ -443,7 +454,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         } else {
             log.warn("CSDN tag popup still visible after close attempt: durationMs={}", elapsed(startedAt));
         }
-        boolean mainModalVerified = verifyTagsInMainModal(page, selectedTags);
+        boolean mainModalVerified = hasAnySelectedTagInMainModal(page) || verifyTagsInMainModal(page, selectedTags);
         if (selectedTags.isEmpty()) {
             log.warn("CSDN tag fill failed: reason=no-selected-tags, tagCount={}, durationMs={}", normalizedTags.size(), elapsed(startedAt));
             log.warn("CSDN tag main modal verification failed: tagCount={}, durationMs={}", normalizedTags.size(), elapsed(startedAt));
@@ -500,8 +511,21 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
 
     private boolean selectPublishTag(Page page, String tag, long startedAt, boolean fallbackRecommended) {
         try {
+            if (hasAnySelectedTagInMainModal(page)) {
+                return true;
+            }
+            if (!ensureTagInputFocused(page)) {
+                log.warn("CSDN tag select failed: reason=tag-input-not-focused, tagLength={}, durationMs={}",
+                        tag.length(), elapsed(startedAt));
+                return false;
+            }
             clearTagInput(page);
             log.info("CSDN tag input cleared: durationMs={}", elapsed(startedAt));
+            if (!ensureTagInputFocused(page)) {
+                log.warn("CSDN tag select failed: reason=tag-input-lost-focus, tagLength={}, durationMs={}",
+                        tag.length(), elapsed(startedAt));
+                return false;
+            }
             page.keyboard().insertText(tag);
             log.info("CSDN tag typed: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
             sleep(500);
@@ -516,14 +540,17 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                 }
                 sleep(500);
             }
-            if (verifyTagChip(page, tag)) {
+            if (verifyTagChip(page, tag) || hasAnySelectedTagInMainModal(page)) {
                 log.info("CSDN tag chip verified: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
                 return true;
+            }
+            if (!ensureTagInputFocused(page)) {
+                return false;
             }
             page.keyboard().press("Enter");
             log.info("CSDN tag enter pressed: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
             sleep(500);
-            if (verifyTagChip(page, tag)) {
+            if (verifyTagChip(page, tag) || hasAnySelectedTagInMainModal(page)) {
                 log.info("CSDN tag chip verified: tagLength={}, durationMs={}", tag.length(), elapsed(startedAt));
                 return true;
             }
@@ -531,6 +558,47 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         } catch (RuntimeException exception) {
             log.warn("CSDN tag select failed: reason={}, tagLength={}, durationMs={}",
                     safeMessage(exception), tag.length(), elapsed(startedAt));
+            return false;
+        }
+    }
+
+    private boolean ensureTagInputFocused(Page page) {
+        try {
+            Object focused = page.evaluate("""
+                    () => {
+                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                      };
+                      const forbidden = element => {
+                        const hint = [
+                          element?.getAttribute?.('placeholder') || '',
+                          element?.getAttribute?.('aria-label') || '',
+                          text(element?.closest?.('div, section, label')?.innerText || '')
+                        ].join(' ');
+                        return hint.includes('文章摘要') || hint.includes('摘要') || hint.includes('本内容会在各展现列表中展示');
+                      };
+                      const roots = Array.from(document.querySelectorAll('[role="dialog"], [role="listbox"], [class*="dropdown"], [class*="popover"], [class*="suggest"], [class*="recommend"]'))
+                        .filter(root => visible(root) && /标签|推荐|添加/.test(text(root.innerText || root.textContent || '')));
+                      const inputs = roots.flatMap(root => Array.from(root.querySelectorAll('input, textarea, [contenteditable="true"]')))
+                        .filter(element => visible(element) && !forbidden(element));
+                      const input = inputs.find(element => {
+                        const hint = [
+                          element.getAttribute('placeholder') || '',
+                          element.getAttribute('aria-label') || '',
+                          text(element.closest('div, section, label')?.innerText || '')
+                        ].join(' ');
+                        return hint.includes('标签') || hint.includes('请输入') || element.tagName === 'INPUT';
+                      }) || inputs[0];
+                      if (!input) return false;
+                      input.focus();
+                      return document.activeElement === input || input.contains(document.activeElement);
+                    }
+                    """);
+            return Boolean.TRUE.equals(focused);
+        } catch (RuntimeException ignored) {
             return false;
         }
     }
@@ -549,7 +617,15 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                         .filter(root => visible(root) && /标签|推荐|添加/.test(text(root.innerText || root.textContent || '')));
                       roots.push(document.body);
                       const inputs = roots.flatMap(root => Array.from(root.querySelectorAll('input, textarea, [contenteditable="true"]')))
-                        .filter(visible);
+                        .filter(element => {
+                          if (!visible(element)) return false;
+                          const hint = [
+                            element.getAttribute('placeholder') || '',
+                            element.getAttribute('aria-label') || '',
+                            text(element.closest('div, section, label')?.innerText || '')
+                          ].join(' ');
+                          return !hint.includes('文章摘要') && !hint.includes('摘要') && !hint.includes('本内容会在各展现列表中展示');
+                        });
                       const input = inputs.find(element => {
                         const hint = [
                           element.getAttribute('placeholder') || '',
@@ -621,6 +697,57 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
 
     private boolean verifyTagChip(Page page, String tag) {
         return verifyTagChipInPopup(page, tag) || verifyTagChipInMainModal(page, tag);
+    }
+
+    private boolean hasAnySelectedTagInMainModal(Page page) {
+        try {
+            Object verified = page.evaluate("""
+                    () => {
+                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
+                      const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                      };
+                      const roots = Array.from(document.querySelectorAll('[role="dialog"], .modal, .ant-modal, [class*="modal"], [class*="dialog"]'));
+                      roots.push(document.body);
+                      const dialog = roots.find(root => visible(root)
+                        && text(root.innerText || root.textContent || '').includes('文章标签')
+                        && text(root.innerText || root.textContent || '').includes('文章摘要')
+                        && Array.from(root.querySelectorAll('button')).some(button => visible(button) && text(button.innerText || button.textContent) === '发布文章'));
+                      if (!dialog) return false;
+                      const controls = Array.from(dialog.querySelectorAll('button, span, div, li'))
+                        .filter(visible)
+                        .map(element => ({
+                          element,
+                          label: text(element.innerText || element.textContent || ''),
+                          aria: text(element.getAttribute('aria-label') || '')
+                        }))
+                        .filter(item => item.label
+                          && item.label !== '文章标签'
+                          && item.label !== '+ 添加文章标签'
+                          && item.label !== '添加文章标签'
+                          && !item.label.includes('文章摘要')
+                          && !item.label.includes('添加封面')
+                          && !item.label.includes('发布文章')
+                          && !item.label.includes('保存为草稿')
+                          && !item.label.includes('定时发布'));
+                      return controls.some(item => {
+                        const root = item.element.closest('button, span, li, div') || item.element;
+                        const snapshot = text(root.innerText || root.textContent || '');
+                        const hasRemove = /关闭|删除|移除|close|delete|remove|×|x/i.test(item.aria)
+                          || Array.from(root.querySelectorAll('[aria-label], button, i, svg, span'))
+                            .some(child => /关闭|删除|移除|close|delete|remove|×|x/i.test(text(child.getAttribute('aria-label') || child.innerText || child.textContent || '')));
+                        const looksChip = hasRemove && snapshot.length > 0 && snapshot.length <= 30;
+                        const inTagRow = text(root.closest('div, section, li')?.innerText || '').includes('文章标签');
+                        return looksChip || (inTagRow && snapshot.length > 0 && snapshot.length <= 20 && !snapshot.includes('添加文章标签'));
+                      });
+                    }
+                    """);
+            return Boolean.TRUE.equals(verified);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private boolean verifyTagChipInMainModal(Page page, String tag) {
