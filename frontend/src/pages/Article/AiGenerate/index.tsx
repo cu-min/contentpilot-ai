@@ -52,9 +52,10 @@ export default function ArticleAiGenerate() {
 
   const handleFinish = async (values: AiArticleGenerateRequest) => {
     setGenerating(true);
+    message.info('文章后台自动生成中', 3);
     try {
       const result = await generateArticle(values);
-      message.success('生成成功');
+      message.success('文章生成成功', 3);
       navigate(`/articles/${result.data.articleId}`);
     } catch (error) {
       message.error(formatFailure('生成', error));
@@ -66,7 +67,7 @@ export default function ArticleAiGenerate() {
   return (
     <PageContainer
       title="AI生成文章"
-      description="可选择产品作为上下文，也可以不选择产品，直接按主题生成原始营销文章并保存到文章库草稿。"
+      description="输入一个主题，就能生成一篇可编辑的营销文章；选择产品后，内容会更贴近你的品牌表达。"
     >
       <Form
         form={form}
@@ -114,6 +115,8 @@ export default function ArticleAiGenerate() {
         </SectionCard>
 
         <SectionCard>
+          <Typography.Text strong>生成参数</Typography.Text>
+          <div style={{ height: 18 }} />
           <Form.Item
             label="文章主题"
             name="topic"

@@ -14,6 +14,32 @@
   gap: 8px;
 }
 
+.markdown-preview-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.markdown-preview-panel-limited .markdown-preview {
+  height: 360px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.platform-content-preview-panel .markdown-preview {
+  height: 420px;
+}
+
+.markdown-preview-modal-body {
+  max-height: min(70vh, 760px);
+  overflow: auto;
+}
+
+.markdown-preview-modal-body .markdown-preview {
+  min-height: 0;
+}
+
 .platform-content-rule-alert {
   margin-bottom: 16px;
 }

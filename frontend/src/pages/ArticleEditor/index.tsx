@@ -1,6 +1,6 @@
-import { Button, Col, Form, Input, Row, Select, Space, Typography, message } from 'antd';
+import { Button, Col, Form, Input, Modal, Row, Select, Space, Typography, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { createArticle, getArticleDetail, updateArticle } from '../../api/article';
 import MarkdownPreview from '../../components/MarkdownPreview';
 import PageContainer from '../../components/PageContainer';
@@ -21,17 +21,20 @@ const { TextArea } = Input;
 export default function ArticleEditor() {
   const navigate = useNavigate();
   const params = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const articleId = params.id ? Number(params.id) : null;
   const isEdit = Boolean(articleId);
   const [form] = Form.useForm<ArticleCreatePayload>();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const content = Form.useWatch('content', form);
+  const openPlatformGenerate = searchParams.get('openPlatformGenerate') === '1';
 
   const pageDescription = useMemo(
     () => isEdit
-      ? '查看和编辑文章基础信息与 Markdown 正文。归档状态由文章列表操作维护。'
-      : '手动创建文章草稿，为后续 AI 生成和平台适配阶段预留内容基础。',
+      ? '打磨标题、摘要和正文，让一篇文章继续变成适合不同平台发布的内容。'
+      : '从一篇新文章开始，把想法写成草稿，再继续适配到不同平台。',
     [isEdit],
   );
 
@@ -82,6 +85,8 @@ export default function ArticleEditor() {
       description={pageDescription}
     >
       <SectionCard className="article-editor-card" loading={loading}>
+        <Typography.Text strong>文章内容</Typography.Text>
+        <div style={{ height: 18 }} />
         <Form
           form={form}
           layout="vertical"
@@ -160,8 +165,11 @@ export default function ArticleEditor() {
               </Form.Item>
             </Col>
             <Col xs={24} xl={12}>
-              <div className="markdown-preview-panel">
-                <Typography.Text strong>Markdown 预览</Typography.Text>
+              <div className="markdown-preview-panel markdown-preview-panel-limited">
+                <div className="markdown-preview-panel-header">
+                  <Typography.Text strong>Markdown 预览</Typography.Text>
+                  <Button size="small" onClick={() => setPreviewOpen(true)}>展示全部</Button>
+                </div>
                 <MarkdownPreview value={content} />
               </div>
             </Col>
@@ -174,7 +182,25 @@ export default function ArticleEditor() {
           </Space>
         </Form>
       </SectionCard>
-      {articleId ? <PlatformContentSection articleId={articleId} /> : null}
+      <Modal
+        title="Markdown 预览"
+        open={previewOpen}
+        onCancel={() => setPreviewOpen(false)}
+        footer={null}
+        centered
+        width={920}
+      >
+        <div className="markdown-preview-modal-body">
+          <MarkdownPreview value={content} />
+        </div>
+      </Modal>
+      {articleId ? (
+        <PlatformContentSection
+          articleId={articleId}
+          autoOpenGenerate={openPlatformGenerate}
+          onAutoOpenGenerateHandled={() => setSearchParams({})}
+        />
+      ) : null}
     </PageContainer>
   );
 }

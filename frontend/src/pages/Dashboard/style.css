@@ -40,8 +40,59 @@
   background: #f8fafc;
 }
 
-.dashboard-health {
+.dashboard-health-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid #d9f7be;
+  border-radius: 8px;
+  background: #f6ffed;
+}
+
+.dashboard-health-card.is-error {
+  border-color: #ffccc7;
+  background: #fff2f0;
+}
+
+.dashboard-health-card.is-loading {
+  border-color: #d6e4ff;
+  background: #f0f5ff;
+}
+
+.dashboard-health-indicator {
+  width: 12px;
+  height: 40px;
+  border-radius: 999px;
+  background: #52c41a;
+}
+
+.dashboard-health-card.is-error .dashboard-health-indicator {
+  background: #ff4d4f;
+}
+
+.dashboard-health-card.is-loading .dashboard-health-indicator {
+  background: #1677ff;
+}
+
+.dashboard-health-title {
+  display: block;
+  color: #667085;
+  font-size: 13px;
+}
+
+.dashboard-health-status.ant-typography {
+  margin: 2px 0;
+  color: #1f2937;
+}
+
+.dashboard-health-detail {
+  color: #667085;
+}
+
+.dashboard-health-spin {
+  margin-left: auto;
 }
 
 .dashboard-section-head {

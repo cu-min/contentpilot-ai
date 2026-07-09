@@ -49,8 +49,7 @@ public class ArticleServiceImpl extends ServiceImpl<ArticleMapper, Article> impl
         validateOptionalFilters(request);
         Page<Article> articlePage = new Page<>(normalizePage(request.getPage()), normalizeSize(request.getSize()));
         LambdaQueryWrapper<Article> wrapper = new LambdaQueryWrapper<Article>()
-                .orderByDesc(Article::getUpdatedAt)
-                .orderByDesc(Article::getId);
+                .last("ORDER BY CASE WHEN status = 'ARCHIVED' THEN 1 ELSE 0 END ASC, updated_at DESC, id DESC");
 
         if (StringUtils.hasText(request.getKeyword())) {
             wrapper.and(query -> query

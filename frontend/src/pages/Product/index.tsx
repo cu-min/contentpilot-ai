@@ -10,6 +10,7 @@ import {
 import PageContainer from '../../components/PageContainer';
 import SectionCard from '../../components/SectionCard';
 import type { ProductConfig } from '../../types/product';
+import { formatDateTime } from '../../utils/datetime';
 import { formatFailure } from '../../utils/feedback';
 
 const { TextArea } = Input;
@@ -93,7 +94,12 @@ export default function Product() {
       title: '官网链接',
       dataIndex: 'officialUrl',
       width: 220,
-      render: (value?: string) => value || '-',
+      ellipsis: true,
+      render: (value?: string) => value ? (
+        <Typography.Link href={value} target="_blank" rel="noreferrer" ellipsis>
+          {value}
+        </Typography.Link>
+      ) : '-',
     },
     {
       title: '目标用户',
@@ -111,7 +117,7 @@ export default function Product() {
       title: '更新时间',
       dataIndex: 'updatedAt',
       width: 180,
-      render: (value?: string) => (value ? value.replace('T', ' ').slice(0, 16) : '-'),
+      render: (value?: string) => formatDateTime(value),
     },
     {
       title: '操作',
@@ -141,15 +147,16 @@ export default function Product() {
   return (
     <PageContainer
       title="产品配置"
-      description="维护多个推广产品的信息，AI 生成文章时可选择其中一个产品作为上下文，也可以不选择产品。"
+      description="把产品亮点、目标用户和品牌语气整理好，让每一次内容生成都更贴近你的产品。"
     >
       <SectionCard>
-        <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }}>
-          <Typography.Text strong>产品列表</Typography.Text>
-          <Button type="primary" onClick={openCreateModal}>
-            新增产品
-          </Button>
-        </Space>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Typography.Text strong>产品列表</Typography.Text>
+            <Button type="primary" onClick={openCreateModal}>
+              新增产品
+            </Button>
+          </Space>
         <Table
           rowKey={(record) => String(record.id)}
           columns={columns}
@@ -157,6 +164,7 @@ export default function Product() {
           loading={loading}
           pagination={{ pageSize: 10 }}
         />
+        </Space>
       </SectionCard>
 
       <Modal

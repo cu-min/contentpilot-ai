@@ -1,5 +1,4 @@
 import {
-  Alert,
   Button,
   Empty,
   Form,
@@ -37,6 +36,7 @@ import {
   getPlatformContentPlatformLabel,
   platformContentOptions,
 } from '../../types/platformContent';
+import { formatDateTime } from '../../utils/datetime';
 import { formatFailure } from '../../utils/feedback';
 
 const { TextArea } = Input;
@@ -186,7 +186,7 @@ export default function Platform() {
       width: 120,
       responsive: ['md'],
       render: (configured: boolean) => (
-        <Tag color={configured ? 'warning' : 'default'}>
+        <Tag color={configured ? 'success' : 'default'}>
           {configured ? '已配置' : '未配置'}
         </Tag>
       ),
@@ -213,7 +213,7 @@ export default function Platform() {
       dataIndex: 'updatedAt',
       width: 180,
       responsive: ['xl'],
-      render: (value?: string) => value || '-',
+      render: (value?: string) => formatDateTime(value),
     },
     {
       title: '操作',
@@ -244,16 +244,10 @@ export default function Platform() {
   return (
     <PageContainer
       title="平台管理"
-      description="配置公司统一平台账号，为后续不同平台 Publisher、草稿创建和自动填充流程预留认证与发布方式。"
+      description="把常用发布平台连接起来，一次配置账号，后续文章就能顺畅发布到各个平台。"
     >
       <SectionCard>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Alert
-            type="info"
-            showIcon
-            message="平台账号配置会在发布任务执行时使用。"
-            description="认证配置属于敏感信息，列表和详情均不会明文回显；编辑时留空表示保留原配置。WECHAT_OFFICIAL + OFFICIAL_API 会创建公众号草稿，JUEJIN + UNOFFICIAL_API 会调用真实掘金接口。"
-          />
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Typography.Text strong>平台账号列表</Typography.Text>
             <Button type="primary" onClick={openCreate}>新增平台账号</Button>

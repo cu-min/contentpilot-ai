@@ -11,6 +11,7 @@ import {
   articleStatusOptions,
   getArticleStatusLabel,
 } from '../../types/article';
+import { formatDateTime } from '../../utils/datetime';
 import { formatFailure } from '../../utils/feedback';
 
 export default function Article() {
@@ -77,7 +78,39 @@ export default function Article() {
 
   const formatLatestTime = (record: ArticleListItem) => {
     const value = record.updatedAt || record.createdAt;
-    return value ? value.replace('T', ' ') : '-';
+    return formatDateTime(value);
+  };
+
+  const renderActions = (record: ArticleListItem) => {
+    if (record.status === 'ARCHIVED') {
+      return (
+        <Space size={4} wrap>
+          <Button type="link" onClick={() => navigate(`/articles/${record.id}`)}>
+            查看/编辑
+          </Button>
+          <Button type="link" onClick={() => void handleRestore(record)}>
+            恢复
+          </Button>
+        </Space>
+      );
+    }
+
+    return (
+      <Space size={4} wrap>
+        <Button type="link" onClick={() => navigate(`/articles/${record.id}`)}>
+          查看/编辑
+        </Button>
+        <Button type="link" onClick={() => navigate(`/articles/${record.id}?openPlatformGenerate=1`)}>
+          生成平台稿
+        </Button>
+        <Button type="link" onClick={() => navigate(`/publish?articleId=${record.id}`)}>
+          发布平台稿
+        </Button>
+        <Button type="link" danger onClick={() => handleArchive(record)}>
+          归档
+        </Button>
+      </Space>
+    );
   };
 
   const columns: TableProps<ArticleListItem>['columns'] = [
@@ -113,30 +146,15 @@ export default function Article() {
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: 170,
-      render: (_, record) => (
-        <Space size={4}>
-          <Button type="link" onClick={() => navigate(`/articles/${record.id}`)}>
-            查看/编辑
-          </Button>
-          {record.status === 'ARCHIVED' ? (
-            <Button type="link" onClick={() => void handleRestore(record)}>
-              恢复
-            </Button>
-          ) : (
-            <Button type="link" danger onClick={() => handleArchive(record)}>
-              归档
-            </Button>
-          )}
-        </Space>
-      ),
+      width: 320,
+      render: (_, record) => renderActions(record),
     },
   ];
 
   return (
     <PageContainer
       title="文章库"
-      description="统一管理手动创建和 AI 生成的营销文章，支持查看、编辑、归档和恢复。"
+      description="所有文章都在这里沉淀：快速查找、编辑和归档，也可以进入详情继续生成平台稿。"
     >
       <SectionCard className="article-list-card">
         <Space direction="vertical" size={18} style={{ width: '100%' }}>

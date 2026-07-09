@@ -1,4 +1,4 @@
-import { Alert, Button, Col, Row, Space, Spin, Statistic, Typography } from 'antd';
+import { Button, Col, Row, Space, Spin, Statistic, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getHealth } from '../../api/health';
@@ -11,9 +11,9 @@ const workflowSteps = [
   { title: 'AI 生成文章', description: '基于主题生成营销内容', path: '/ai-generate' },
   { title: '文章库', description: '编辑正文并管理文章状态', path: '/articles' },
   { title: '平台稿', description: '为不同平台重组内容', path: '/articles' },
-  { title: '平台账号', description: '配置掘金等平台账号', path: '/platform' },
+  { title: '平台账号', description: '配置各平台发布账号', path: '/platform' },
   { title: '发布任务', description: '创建任务并提交待执行', path: '/publish' },
-  { title: '执行发布', description: '掘金真实文章发布', path: '/publish' },
+  { title: '正式发布', description: '同步平台发布结果', path: '/publish' },
 ];
 
 export default function Dashboard() {
@@ -36,21 +36,22 @@ export default function Dashboard() {
   }, []);
 
   const backendStatus = healthMessage ? '运行中' : error ? '异常' : '检测中';
+  const backendStatusClass = healthMessage ? 'is-success' : error ? 'is-error' : 'is-loading';
 
   return (
     <PageContainer
       title="首页概览"
-      description="聚焦当前 MVP 主链路：从产品配置、AI 文章生成、多平台适配，到发布任务执行与掘金真实文章发布。"
+      description="从一个想法到多平台发布，让好内容更快成形，让好产品被更多人看见。"
     >
       <SectionCard className="dashboard-panel">
         <div className="dashboard-status">
           <div>
-            <Typography.Text className="dashboard-eyebrow">MVP 工作台</Typography.Text>
+            <Typography.Text className="dashboard-eyebrow">内容营销工作台</Typography.Text>
             <Typography.Title level={4} className="dashboard-heading">
-              内容生成到发布执行闭环
+              从选题生成到全平台发布的一体化流程
             </Typography.Title>
             <Typography.Paragraph className="dashboard-copy">
-              从产品信息到平台发布稿，再到发布任务执行，运营人员可以按流程完成一次内容分发准备。
+              运营人员可以从产品资料生成文章，适配微信公众号、掘金、CSDN、知乎等平台，并在发布任务中查看执行结果。
             </Typography.Paragraph>
           </div>
           <Space wrap>
@@ -67,7 +68,7 @@ export default function Dashboard() {
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <div className="dashboard-stat">
-              <Statistic title="真实平台试点" value="掘金文章" />
+              <Statistic title="适配平台" value="多平台" />
             </div>
           </Col>
           <Col xs={24} sm={12} lg={6}>
@@ -77,30 +78,35 @@ export default function Dashboard() {
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <div className="dashboard-stat">
-              <Statistic title="后端状态" value={backendStatus} />
+              <Statistic title="发布链路" value="正式可用" />
             </div>
           </Col>
         </Row>
 
-        <div className="dashboard-health">
+        <div className={`dashboard-health-card ${backendStatusClass}`}>
+          <div className="dashboard-health-indicator" />
+          <div>
+            <Typography.Text className="dashboard-health-title">后端服务</Typography.Text>
+            <Typography.Title level={5} className="dashboard-health-status">
+              {backendStatus}
+            </Typography.Title>
+            <Typography.Text className="dashboard-health-detail">
+              {loading ? '正在检查服务连接' : healthMessage || error}
+            </Typography.Text>
+          </div>
           {loading && (
-            <Space>
+            <Space className="dashboard-health-spin">
               <Spin size="small" />
-              <Typography.Text type="secondary">正在检查后端服务</Typography.Text>
             </Space>
           )}
-          {!loading && healthMessage && (
-            <Alert type="success" message={healthMessage} showIcon />
-          )}
-          {!loading && error && <Alert type="error" message={error} showIcon />}
         </div>
       </SectionCard>
 
       <SectionCard className="dashboard-panel">
         <div className="dashboard-section-head">
           <div>
-            <Typography.Title level={5}>MVP 主流程</Typography.Title>
-            <Typography.Text type="secondary">按顺序完成即可得到一条可演示的内容营销发布链路。</Typography.Text>
+            <Typography.Title level={5}>主流程</Typography.Title>
+            <Typography.Text type="secondary">按顺序操作即可完成一次从文章生成到平台发布的完整链路。</Typography.Text>
           </div>
         </div>
         <div className="workflow-grid">

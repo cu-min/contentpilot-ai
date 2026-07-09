@@ -1,5 +1,4 @@
 import {
-  Alert,
   Button,
   Checkbox,
   Empty,
@@ -32,6 +31,7 @@ import type {
   PlatformContentPlatform,
   PlatformContentUpdatePayload,
 } from '../../types/platformContent';
+import { formatDateTime } from '../../utils/datetime';
 import { formatFailure } from '../../utils/feedback';
 import {
   getPlatformContentPlatformLabel,
@@ -44,9 +44,15 @@ const { TextArea } = Input;
 
 interface PlatformContentSectionProps {
   articleId: number;
+  autoOpenGenerate?: boolean;
+  onAutoOpenGenerateHandled?: () => void;
 }
 
-export default function PlatformContentSection({ articleId }: PlatformContentSectionProps) {
+export default function PlatformContentSection({
+  articleId,
+  autoOpenGenerate = false,
+  onAutoOpenGenerateHandled,
+}: PlatformContentSectionProps) {
   const navigate = useNavigate();
   const [generateForm] = Form.useForm<PlatformContentGeneratePayload>();
   const [editForm] = Form.useForm<PlatformContentUpdatePayload>();
@@ -58,6 +64,7 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
   const [detailLoading, setDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [current, setCurrent] = useState<ArticlePlatformContent | null>(null);
+  const [fullPreviewOpen, setFullPreviewOpen] = useState(false);
   const editingContent = Form.useWatch('content', editForm);
 
   const loadItems = async () => {
@@ -76,16 +83,25 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
     void loadItems();
   }, [articleId]);
 
+  useEffect(() => {
+    if (!autoOpenGenerate) {
+      return;
+    }
+    setGenerateOpen(true);
+    onAutoOpenGenerateHandled?.();
+  }, [autoOpenGenerate, onAutoOpenGenerateHandled]);
+
   const handleGenerate = async (values: PlatformContentGeneratePayload) => {
     setGenerating(true);
+    message.info('平台稿后台自动生成中', 3);
     try {
       await generatePlatformContents(articleId, values);
-      message.success('适配成功');
+      message.success('平台稿生成成功', 3);
       setGenerateOpen(false);
       generateForm.resetFields();
       await loadItems();
     } catch (error) {
-      message.error(formatFailure('适配', error));
+      message.error(formatFailure('平台稿生成', error));
     } finally {
       setGenerating(false);
     }
@@ -182,7 +198,7 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
       dataIndex: 'updatedAt',
       width: 180,
       responsive: ['lg'],
-      render: (value?: string) => value || '-',
+      render: (value?: string) => formatDateTime(value),
     },
     {
       title: '操作',
@@ -219,13 +235,6 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
           </Button>
         )}
       >
-        <Alert
-          className="platform-content-rule-alert"
-          type="info"
-          showIcon
-          message="平台适配会自动删减、重组和改写内容，不是简单复制原文。"
-          description="系统会保留核心观点、产品价值、用户痛点、解决方案和温和转化引导，同时删除不适合目标平台的长铺垫、硬广表达和冗余段落。"
-        />
         <Table
           rowKey="id"
           loading={loading}
@@ -328,12 +337,27 @@ export default function PlatformContentSection({ articleId }: PlatformContentSec
             <Form.Item label="Markdown 正文" name="content">
               <TextArea className="platform-content-markdown-editor" />
             </Form.Item>
-            <div className="markdown-preview-panel">
-              <Typography.Text strong>Markdown 预览</Typography.Text>
+            <div className="markdown-preview-panel markdown-preview-panel-limited platform-content-preview-panel">
+              <div className="markdown-preview-panel-header">
+                <Typography.Text strong>Markdown 预览</Typography.Text>
+                <Button size="small" onClick={() => setFullPreviewOpen(true)}>展示全部</Button>
+              </div>
               <MarkdownPreview value={editingContent} />
             </div>
           </div>
         </Form>
+      </Modal>
+      <Modal
+        title="Markdown 预览"
+        open={fullPreviewOpen}
+        onCancel={() => setFullPreviewOpen(false)}
+        footer={null}
+        centered
+        width={920}
+      >
+        <div className="markdown-preview-modal-body">
+          <MarkdownPreview value={editingContent} />
+        </div>
       </Modal>
     </>
   );

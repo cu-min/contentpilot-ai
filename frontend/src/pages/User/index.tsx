@@ -124,7 +124,7 @@ export default function User() {
   return (
     <PageContainer
       title="用户管理"
-      description="管理系统用户、角色和启用状态。"
+      description="给团队成员安排合适的权限，让内容生产和发布流程有人管理、有人执行。"
     >
       <SectionCard>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>

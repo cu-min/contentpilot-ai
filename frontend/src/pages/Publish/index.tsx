@@ -1,5 +1,4 @@
 import {
-  Alert,
   Button,
   DatePicker,
   Empty,
@@ -45,6 +44,7 @@ import {
   publishTaskStatusOptions,
   publishTypeOptions,
 } from '../../types/publishTask';
+import { formatDateTime } from '../../utils/datetime';
 import { formatFailure, getErrorText } from '../../utils/feedback';
 
 const CSDN_MANAGE_URL = 'https://mp.csdn.net/mp_blog/manage/article';
@@ -169,11 +169,16 @@ export default function Publish() {
 
   useEffect(() => {
     const platformContentId = Number(searchParams.get('platformContentId'));
-    if (!platformContentId) {
+    const articleId = Number(searchParams.get('articleId'));
+    if (platformContentId) {
+      void openCreate(platformContentId);
+      setSearchParams({});
       return;
     }
-    void openCreate(platformContentId);
-    setSearchParams({});
+    if (articleId) {
+      void openCreateForArticle(articleId);
+      setSearchParams({});
+    }
   }, [searchParams, setSearchParams]);
 
   const openCreate = async (platformContentId?: number) => {
@@ -199,6 +204,22 @@ export default function Publish() {
     } catch (error) {
       message.error(error instanceof Error ? error.message : '平台稿详情加载失败');
     }
+  };
+
+  const openCreateForArticle = async (articleId: number) => {
+    setEditing(null);
+    form.resetFields();
+    form.setFieldsValue({
+      articleId,
+      platformContentId: undefined,
+      accountId: undefined,
+      title: undefined,
+      publishType: 'IMMEDIATE',
+      scheduleTime: undefined,
+    });
+    setModalOpen(true);
+    await loadPlatformContents(articleId);
+    await loadAccounts();
   };
 
   const openEdit = async (record: PublishTask) => {
@@ -486,9 +507,9 @@ export default function Publish() {
 
   const getPublishDisplayTime = (record: PublishTask) => {
     if (record.publishType === 'SCHEDULED' && record.scheduleTime) {
-      return record.scheduleTime;
+      return formatDateTime(record.scheduleTime);
     }
-    return record.updatedAt || record.createdAt || '-';
+    return formatDateTime(record.updatedAt || record.createdAt);
   };
 
   const renderTaskActions = (record: PublishTask) => {
@@ -754,16 +775,10 @@ export default function Publish() {
   return (
     <PageContainer
       title="发布任务"
-      description="创建平台发布稿的发布任务，提交后可手动执行自动发布或草稿创建。"
+      description="把准备好的平台稿送出去：创建任务、自动发布、查看结果，每一步都清清楚楚。"
     >
       <SectionCard>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Alert
-            type="info"
-            showIcon
-            message="JUEJIN + UNOFFICIAL_API 会访问真实掘金接口。"
-            description="WECHAT_OFFICIAL + OFFICIAL_API 默认创建公众号草稿；账号配置 draftOnly=false 后会提交微信正式发布，发布后可点击刷新状态同步微信确认结果和掘金文章状态。"
-          />
           <Form form={filterForm} layout="inline" onFinish={() => loadTasks(1, pagination.pageSize)}>
             <Form.Item name="platform">
               <Select
