@@ -505,6 +505,23 @@ export default function Publish() {
     });
   };
 
+  const compactFailureText = (record: PublishTask) => {
+    const text = (record.errorMessage || getPublishTaskStatusLabel(record.status) || '请查看失败原因')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return text.length > 34 ? `${text.slice(0, 34)}...` : text;
+  };
+
+  const renderCompactFailureText = (record: PublishTask) => (
+    <Typography.Text
+      type="secondary"
+      ellipsis={{ tooltip: record.errorMessage }}
+      style={{ display: 'block', maxWidth: 180, whiteSpace: 'nowrap' }}
+    >
+      {compactFailureText(record)}
+    </Typography.Text>
+  );
+
   const getPublishDisplayTime = (record: PublishTask) => {
     if (record.publishType === 'SCHEDULED' && record.scheduleTime) {
       return formatDateTime(record.scheduleTime);
@@ -732,9 +749,7 @@ export default function Publish() {
             return (
               <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
                 <Typography.Text type="danger">知乎发布失败</Typography.Text>
-                <Typography.Text type="secondary" style={{ whiteSpace: 'pre-wrap' }}>
-                  {record.errorMessage || getPublishTaskStatusLabel(record.status) || '请查看失败原因'}
-                </Typography.Text>
+                {renderCompactFailureText(record)}
               </Space>
             );
           }
@@ -742,7 +757,7 @@ export default function Publish() {
             return (
               <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
                 <Typography.Text type="danger">CSDN 发布失败</Typography.Text>
-                <Typography.Text type="secondary">{record.errorMessage || getPublishTaskStatusLabel(record.status) || '请查看失败原因'}</Typography.Text>
+                {renderCompactFailureText(record)}
               </Space>
             );
           }
