@@ -76,6 +76,26 @@ CREATE TABLE IF NOT EXISTS platform_account (
     KEY idx_platform_account_enabled (enabled)
 );
 
+CREATE TABLE IF NOT EXISTS growth_tracking_target (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(100) NOT NULL,
+    platform VARCHAR(50) NOT NULL,
+    target_url VARCHAR(1000) NOT NULL,
+    remark VARCHAR(500),
+    enabled TINYINT NOT NULL DEFAULT 1,
+    last_check_status VARCHAR(50) NOT NULL DEFAULT 'UNKNOWN',
+    last_http_status INT,
+    last_page_title VARCHAR(255),
+    last_error_message VARCHAR(1000),
+    last_checked_at DATETIME,
+    created_by BIGINT,
+    created_at DATETIME,
+    updated_at DATETIME,
+    KEY idx_growth_tracking_target_name (name),
+    KEY idx_growth_tracking_target_platform (platform),
+    KEY idx_growth_tracking_target_enabled (enabled)
+);
+
 CREATE TABLE IF NOT EXISTS publish_task (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     article_id BIGINT NOT NULL,
