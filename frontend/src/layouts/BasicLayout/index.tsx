@@ -13,6 +13,11 @@ const baseMenuItems: NonNullable<MenuProps['items']> = [
   { key: '/product', label: '产品配置' },
   { key: '/platform', label: '平台管理' },
   { key: '/publish', label: '发布任务' },
+  {
+    key: '/growth',
+    label: '内容增长',
+    children: [{ key: '/growth/tracking', label: '跟踪查询' }],
+  },
 ];
 
 function BasicLayout() {
@@ -20,6 +25,8 @@ function BasicLayout() {
   const location = useLocation();
   const selectedMenuKey = location.pathname.startsWith('/articles') || location.pathname.startsWith('/ai-generate')
     ? '/articles'
+    : location.pathname.startsWith('/growth')
+      ? '/growth/tracking'
     : location.pathname;
 
   const menuItems = authStore.role === 'ADMIN'
@@ -46,6 +53,7 @@ function BasicLayout() {
           className="side-menu"
           mode="inline"
           selectedKeys={[selectedMenuKey]}
+          defaultOpenKeys={['/growth']}
           items={menuItems}
           onClick={handleMenuClick}
         />
