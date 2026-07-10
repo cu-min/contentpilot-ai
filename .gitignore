@@ -8,6 +8,8 @@ frontend/vite.config.d.ts
 .vscode/
 .DS_Store
 *.log
+logs/
+browser-data/
 .env
 application-local.yml
 **/*secret*
