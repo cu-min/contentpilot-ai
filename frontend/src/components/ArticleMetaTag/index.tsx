@@ -26,12 +26,21 @@ const statusColors: Record<ArticleStatus, string> = {
   ARCHIVED: 'default',
 };
 
+const typeColors: Record<ArticleType, string> = {
+  PRODUCT_INTRO: 'blue',
+  TUTORIAL: 'cyan',
+  INDUSTRY_KNOWLEDGE: 'green',
+  COMPARISON: 'purple',
+  SOLUTION: 'orange',
+  SEO: 'geekblue',
+};
+
 export function StatusTag({ status }: ArticleStatusTagProps) {
   return <Tag color={statusColors[status]}>{getArticleStatusLabel(status)}</Tag>;
 }
 
 export function ArticleTypeTag({ type }: ArticleTypeTagProps) {
-  return <Tag color="geekblue">{getArticleTypeLabel(type)}</Tag>;
+  return <Tag color={typeColors[type]}>{getArticleTypeLabel(type)}</Tag>;
 }
 
 export function LanguageTag({ language }: LanguageTagProps) {

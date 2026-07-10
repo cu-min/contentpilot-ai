@@ -3,7 +3,7 @@ import type { TableProps } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { archiveArticle, getArticles, restoreArticle } from '../../api/article';
-import { StatusTag } from '../../components/ArticleMetaTag';
+import { ArticleTypeTag, StatusTag } from '../../components/ArticleMetaTag';
 import PageContainer from '../../components/PageContainer';
 import SectionCard from '../../components/SectionCard';
 import type { ArticleListItem, ArticleQuery } from '../../types/article';
@@ -84,11 +84,11 @@ export default function Article() {
   const renderActions = (record: ArticleListItem) => {
     if (record.status === 'ARCHIVED') {
       return (
-        <Space size={4} wrap>
-          <Button type="link" onClick={() => navigate(`/articles/${record.id}`)}>
+        <Space size={8} wrap={false}>
+          <Button size="small" type="primary" onClick={() => navigate(`/articles/${record.id}`)}>
             查看/编辑
           </Button>
-          <Button type="link" onClick={() => void handleRestore(record)}>
+          <Button size="small" onClick={() => void handleRestore(record)}>
             恢复
           </Button>
         </Space>
@@ -96,17 +96,17 @@ export default function Article() {
     }
 
     return (
-      <Space size={4} wrap>
-        <Button type="link" onClick={() => navigate(`/articles/${record.id}`)}>
+      <Space size={8} wrap={false}>
+        <Button size="small" type="primary" onClick={() => navigate(`/articles/${record.id}`)}>
           查看/编辑
         </Button>
-        <Button type="link" onClick={() => navigate(`/articles/${record.id}?openPlatformGenerate=1`)}>
+        <Button size="small" onClick={() => navigate(`/articles/${record.id}?openPlatformGenerate=1`)}>
           生成平台稿
         </Button>
-        <Button type="link" onClick={() => navigate(`/publish?articleId=${record.id}`)}>
+        <Button size="small" onClick={() => navigate(`/publish?articleId=${record.id}`)}>
           发布平台稿
         </Button>
-        <Button type="link" danger onClick={() => handleArchive(record)}>
+        <Button size="small" danger onClick={() => handleArchive(record)}>
           归档
         </Button>
       </Space>
@@ -117,7 +117,7 @@ export default function Article() {
     {
       title: '标题',
       dataIndex: 'title',
-      width: 260,
+      width: '30%',
       render: (value, record) => (
         <Button type="link" className="table-link-button" onClick={() => navigate(`/articles/${record.id}`)}>
           {value}
@@ -127,26 +127,30 @@ export default function Article() {
     {
       title: '状态',
       dataIndex: 'status',
-      width: 110,
+      width: '9%',
       render: (status) => <StatusTag status={status} />,
     },
     {
-      title: '标签',
-      dataIndex: 'tags',
-      ellipsis: true,
-      render: (value) => value || '-',
+      title: '文章类型',
+      dataIndex: 'type',
+      width: '12%',
+      render: (type) => <ArticleTypeTag type={type} />,
     },
     {
-      title: '最新时间',
+      title: '完成时间',
       key: 'latestTime',
-      width: 170,
-      render: (_, record) => formatLatestTime(record),
+      width: '17%',
+      render: (_, record) => (
+        <Typography.Text style={{ whiteSpace: 'nowrap' }}>
+          {formatLatestTime(record)}
+        </Typography.Text>
+      ),
     },
     {
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: 320,
+      width: '32%',
       render: (_, record) => renderActions(record),
     },
   ];
@@ -201,6 +205,8 @@ export default function Article() {
             </Form.Item>
           </Form>
           <Table
+            className="article-library-table"
+            tableLayout="fixed"
             rowKey="id"
             loading={loading}
             columns={columns}

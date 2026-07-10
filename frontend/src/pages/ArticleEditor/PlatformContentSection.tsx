@@ -92,13 +92,16 @@ export default function PlatformContentSection({
   }, [autoOpenGenerate, onAutoOpenGenerateHandled]);
 
   const handleGenerate = async (values: PlatformContentGeneratePayload) => {
+    if (generating) {
+      return;
+    }
     setGenerating(true);
     message.info('平台稿后台自动生成中', 3);
+    setGenerateOpen(false);
+    generateForm.resetFields();
     try {
       await generatePlatformContents(articleId, values);
       message.success('平台稿生成成功', 3);
-      setGenerateOpen(false);
-      generateForm.resetFields();
       await loadItems();
     } catch (error) {
       message.error(formatFailure('平台稿生成', error));
@@ -260,7 +263,6 @@ export default function PlatformContentSection({
         onOk={() => generateForm.submit()}
         okText="开始生成"
         cancelText="取消"
-        confirmLoading={generating}
         width={760}
       >
         <Form

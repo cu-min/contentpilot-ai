@@ -122,10 +122,10 @@ export default function Product() {
     {
       title: '操作',
       key: 'actions',
-      width: 150,
+      width: 170,
       render: (_, record) => (
-        <Space>
-          <Button type="link" size="small" onClick={() => openEditModal(record)}>
+        <Space size={8} wrap={false}>
+          <Button type="primary" size="small" onClick={() => openEditModal(record)}>
             编辑
           </Button>
           <Popconfirm
@@ -135,7 +135,7 @@ export default function Product() {
             cancelText="取消"
             onConfirm={() => record.id && handleDelete(record.id)}
           >
-            <Button type="link" size="small" danger>
+            <Button size="small" danger>
               删除
             </Button>
           </Popconfirm>
