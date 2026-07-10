@@ -7,6 +7,7 @@ COPY backend/pom.xml backend/maven-central-settings.xml ./
 RUN mvn -s maven-central-settings.xml -B dependency:go-offline
 
 COPY backend/src ./src
+ENV PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
 RUN mvn -s maven-central-settings.xml -B -DskipTests package \
     && mvn -s maven-central-settings.xml -B dependency:build-classpath -Dmdep.outputFile=/tmp/playwright-classpath \
     && java -cp "$(cat /tmp/playwright-classpath)" com.microsoft.playwright.CLI install chromium
