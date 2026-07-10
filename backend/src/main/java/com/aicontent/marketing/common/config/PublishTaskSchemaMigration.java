@@ -21,6 +21,7 @@ public class PublishTaskSchemaMigration {
         addColumnIfMissing("external_article_id", "VARCHAR(100)");
         addColumnIfMissing("draft_url", "VARCHAR(500)");
         addColumnIfMissing("article_status", "VARCHAR(50)");
+        addIndexIfMissing("idx_publish_task_scheduled_due", "publish_type, status, schedule_time");
     }
 
     private void addColumnIfMissing(String columnName, String columnDefinition) {
@@ -37,6 +38,23 @@ public class PublishTaskSchemaMigration {
         );
         if (count == null || count == 0) {
             jdbcTemplate.execute("ALTER TABLE publish_task ADD COLUMN " + columnName + " " + columnDefinition);
+        }
+    }
+
+    private void addIndexIfMissing(String indexName, String columns) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'publish_task'
+                  AND index_name = ?
+                """,
+                Integer.class,
+                indexName
+        );
+        if (count == null || count == 0) {
+            jdbcTemplate.execute("ALTER TABLE publish_task ADD INDEX " + indexName + " (" + columns + ")");
         }
     }
 }

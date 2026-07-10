@@ -62,6 +62,11 @@ export interface PublishTaskPayload {
   platformContentId: number;
   accountId: number;
   title?: string;
+  publishType?: PublishType;
+  scheduleTime?: string;
+}
+
+export interface PublishTaskSubmitPayload {
   publishType: PublishType;
   scheduleTime?: string;
 }

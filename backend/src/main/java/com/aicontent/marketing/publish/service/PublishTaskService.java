@@ -2,6 +2,7 @@ package com.aicontent.marketing.publish.service;
 
 import com.aicontent.marketing.publish.dto.PublishTaskQueryRequest;
 import com.aicontent.marketing.publish.dto.PublishTaskSaveRequest;
+import com.aicontent.marketing.publish.dto.PublishTaskSubmitRequest;
 import com.aicontent.marketing.publish.entity.PublishTask;
 import com.aicontent.marketing.publish.vo.PublishTaskVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -17,11 +18,13 @@ public interface PublishTaskService extends IService<PublishTask> {
 
     PublishTaskVO updateTask(Long id, PublishTaskSaveRequest request, Long currentUserId);
 
-    void submitTask(Long id, Long currentUserId);
+    void submitTask(Long id, PublishTaskSubmitRequest request, Long currentUserId);
 
     void cancelTask(Long id, Long currentUserId);
 
     PublishTaskVO executeTask(Long id, Long currentUserId);
+
+    void executeDueScheduledTasks();
 
     PublishTaskVO refreshArticleStatus(Long id, Long currentUserId);
 }

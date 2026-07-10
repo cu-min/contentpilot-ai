@@ -6,6 +6,7 @@ import {
   Input,
   Modal,
   Popconfirm,
+  Radio,
   Select,
   Space,
   Table,
@@ -14,7 +15,7 @@ import {
   message,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import dayjs from 'dayjs';
+import dayjs, { type Dayjs } from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getArticles } from '../../api/article';
@@ -37,7 +38,13 @@ import type { PlatformAccount } from '../../types/platformAccount';
 import { getPublishModeLabel } from '../../types/platformAccount';
 import type { ArticlePlatformContent, PlatformContentPlatform } from '../../types/platformContent';
 import { getPlatformContentPlatformLabel, platformContentOptions } from '../../types/platformContent';
-import type { PublishTask, PublishTaskPayload, PublishTaskStatus, PublishType } from '../../types/publishTask';
+import type {
+  PublishTask,
+  PublishTaskPayload,
+  PublishTaskStatus,
+  PublishTaskSubmitPayload,
+  PublishType,
+} from '../../types/publishTask';
 import {
   getPublishTaskStatusLabel,
   getPublishTypeLabel,
@@ -55,14 +62,18 @@ interface PublishTaskFormValues {
   platformContentId: number;
   accountId: number;
   title?: string;
+}
+
+interface PublishTaskSubmitFormValues {
   publishType: PublishType;
-  scheduleTime?: unknown;
+  scheduleTime?: Dayjs;
 }
 
 export default function Publish() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [form] = Form.useForm<PublishTaskFormValues>();
+  const [submitForm] = Form.useForm<PublishTaskSubmitFormValues>();
   const [filterForm] = Form.useForm();
   const [tasks, setTasks] = useState<PublishTask[]>([]);
   const [articles, setArticles] = useState<ArticleListItem[]>([]);
@@ -70,15 +81,18 @@ export default function Publish() {
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [executingTaskId, setExecutingTaskId] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [submitModalOpen, setSubmitModalOpen] = useState(false);
+  const [submittingTask, setSubmittingTask] = useState<PublishTask | null>(null);
   const [editing, setEditing] = useState<PublishTask | null>(null);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
 
   const selectedArticleId = Form.useWatch('articleId', form);
   const selectedPlatformContentId = Form.useWatch('platformContentId', form);
-  const selectedPublishType = Form.useWatch('publishType', form);
+  const selectedSubmitPublishType = Form.useWatch('publishType', submitForm);
 
   const selectedPlatformContent = useMemo(
     () => platformContents.find((item) => item.id === selectedPlatformContentId),
@@ -152,6 +166,16 @@ export default function Publish() {
   }, []);
 
   useEffect(() => {
+    if (!tasks.some((task) => task.status === 'PENDING' && task.publishType === 'SCHEDULED')) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      void loadTasks(pagination.current, pagination.pageSize);
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [tasks, pagination.current, pagination.pageSize]);
+
+  useEffect(() => {
     if (!selectedArticleId) {
       setPlatformContents([]);
       return;
@@ -184,7 +208,6 @@ export default function Publish() {
   const openCreate = async (platformContentId?: number) => {
     setEditing(null);
     form.resetFields();
-    form.setFieldsValue({ publishType: 'IMMEDIATE' });
     setModalOpen(true);
     if (!platformContentId) {
       await loadAccounts();
@@ -197,7 +220,6 @@ export default function Publish() {
         articleId: content.articleId,
         platformContentId: content.id,
         title: content.title,
-        publishType: 'IMMEDIATE',
       });
       await loadPlatformContents(content.articleId);
       await loadAccounts(content.platform);
@@ -214,8 +236,6 @@ export default function Publish() {
       platformContentId: undefined,
       accountId: undefined,
       title: undefined,
-      publishType: 'IMMEDIATE',
-      scheduleTime: undefined,
     });
     setModalOpen(true);
     await loadPlatformContents(articleId);
@@ -234,8 +254,6 @@ export default function Publish() {
         platformContentId: task.platformContentId,
         accountId: task.accountId,
         title: task.title,
-        publishType: task.publishType,
-        scheduleTime: task.scheduleTime ? dayjs(task.scheduleTime) : undefined,
       });
       setModalOpen(true);
     } catch (error) {
@@ -244,15 +262,10 @@ export default function Publish() {
   };
 
   const normalizePayload = (values: PublishTaskFormValues): PublishTaskPayload => {
-    const scheduleTimeValue = values.scheduleTime as { format?: (format: string) => string } | undefined;
     return {
       platformContentId: values.platformContentId,
       accountId: values.accountId,
       title: values.title,
-      publishType: values.publishType,
-      scheduleTime: values.publishType === 'SCHEDULED' && scheduleTimeValue?.format
-        ? scheduleTimeValue.format('YYYY-MM-DDTHH:mm:ss')
-        : undefined,
     };
   };
 
@@ -278,13 +291,41 @@ export default function Publish() {
     }
   };
 
-  const handleSubmit = async (record: PublishTask) => {
+  const openSubmit = (record: PublishTask) => {
+    setSubmittingTask(record);
+    submitForm.resetFields();
+    submitForm.setFieldsValue({ publishType: 'IMMEDIATE' });
+    setSubmitModalOpen(true);
+  };
+
+  const handleSubmit = async () => {
+    if (!submittingTask) {
+      return;
+    }
+    const values = await submitForm.validateFields();
+    const now = dayjs();
+    if (values.publishType === 'SCHEDULED' && (!values.scheduleTime || !values.scheduleTime.isAfter(now))) {
+      submitForm.setFields([{ name: 'scheduleTime', errors: ['请选择未来的发布时间'] }]);
+      return;
+    }
+    const payload: PublishTaskSubmitPayload = {
+      publishType: values.publishType,
+      scheduleTime: values.publishType === 'SCHEDULED'
+        ? values.scheduleTime?.format('YYYY-MM-DDTHH:mm:ss')
+        : undefined,
+    };
+    setSubmitting(true);
     try {
-      await submitPublishTask(record.id);
-      message.success('任务提交成功');
+      await submitPublishTask(submittingTask.id, payload);
+      message.success(values.publishType === 'SCHEDULED' ? '定时发布任务已提交' : '任务提交成功');
+      setSubmitModalOpen(false);
+      setSubmittingTask(null);
+      submitForm.resetFields();
       await loadTasks();
     } catch (error) {
       message.error(formatFailure('任务提交', error));
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -529,12 +570,14 @@ export default function Publish() {
     return formatDateTime(record.updatedAt || record.createdAt);
   };
 
+  const disableScheduleDate = (current: Dayjs) => current.isBefore(dayjs(), 'day');
+
   const renderTaskActions = (record: PublishTask) => {
     if (record.status === 'DRAFT') {
       return (
         <Space size={8} wrap>
           <Button size="small" onClick={() => openEdit(record)}>编辑</Button>
-          <Button size="small" type="primary" onClick={() => handleSubmit(record)}>提交</Button>
+          <Button size="small" type="primary" onClick={() => openSubmit(record)}>提交</Button>
           <Popconfirm title="确认取消该发布任务？" okText="取消任务" cancelText="返回" onConfirm={() => handleCancel(record)}>
             <Button size="small">取消</Button>
           </Popconfirm>
@@ -543,6 +586,16 @@ export default function Publish() {
     }
 
     if (record.status === 'PENDING') {
+      if (record.publishType === 'SCHEDULED') {
+        return (
+          <Space size={8} wrap>
+            <Typography.Text type="secondary">等待定时发布</Typography.Text>
+            <Popconfirm title="确认取消该定时发布任务？" okText="取消任务" cancelText="返回" onConfirm={() => handleCancel(record)}>
+              <Button size="small">取消</Button>
+            </Popconfirm>
+          </Space>
+        );
+      }
       return (
         <Space size={8} wrap>
           <Popconfirm title="确认自动发布该文章？" okText="自动发布" cancelText="取消" onConfirm={() => handleExecute(record)}>
@@ -918,20 +971,43 @@ export default function Publish() {
           <Form.Item label="任务标题" name="title">
             <Input maxLength={200} placeholder="默认使用平台稿标题" />
           </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="提交发布任务"
+        open={submitModalOpen}
+        onCancel={() => {
+          setSubmitModalOpen(false);
+          setSubmittingTask(null);
+          submitForm.resetFields();
+        }}
+        onOk={handleSubmit}
+        okText="确认提交"
+        cancelText="取消"
+        confirmLoading={submitting}
+        destroyOnClose
+      >
+        <Form form={submitForm} layout="vertical" requiredMark="optional">
           <Form.Item
             label="发布类型"
             name="publishType"
             rules={[{ required: true, message: '请选择发布类型' }]}
           >
-            <Select options={[...publishTypeOptions]} />
+            <Radio.Group options={[...publishTypeOptions]} />
           </Form.Item>
-          {selectedPublishType === 'SCHEDULED' ? (
+          {selectedSubmitPublishType === 'SCHEDULED' ? (
             <Form.Item
               label="计划发布时间"
               name="scheduleTime"
               rules={[{ required: true, message: '请选择计划发布时间' }]}
             >
-              <DatePicker showTime style={{ width: '100%' }} />
+              <DatePicker
+                showTime
+                format="YYYY-MM-DD HH:mm:ss"
+                disabledDate={disableScheduleDate}
+                style={{ width: '100%' }}
+              />
             </Form.Item>
           ) : null}
         </Form>

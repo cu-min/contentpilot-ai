@@ -4,6 +4,7 @@ import com.aicontent.marketing.auth.security.LoginUser;
 import com.aicontent.marketing.common.result.Result;
 import com.aicontent.marketing.publish.dto.PublishTaskQueryRequest;
 import com.aicontent.marketing.publish.dto.PublishTaskSaveRequest;
+import com.aicontent.marketing.publish.dto.PublishTaskSubmitRequest;
 import com.aicontent.marketing.publish.service.PublishTaskService;
 import com.aicontent.marketing.publish.vo.PublishTaskVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -57,9 +58,10 @@ public class PublishTaskController {
     @PutMapping("/{id}/submit")
     public Result<Void> submit(
             @PathVariable Long id,
+            @Valid @RequestBody(required = false) PublishTaskSubmitRequest request,
             @AuthenticationPrincipal LoginUser loginUser
     ) {
-        publishTaskService.submitTask(id, loginUser.getUserId());
+        publishTaskService.submitTask(id, request, loginUser.getUserId());
         return Result.success();
     }
 

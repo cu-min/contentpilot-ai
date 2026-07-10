@@ -1,6 +1,5 @@
 package com.aicontent.marketing.publish.dto;
 
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -19,7 +18,6 @@ public class PublishTaskSaveRequest {
     @Size(max = 200, message = "任务标题最多 200 个字符")
     private String title;
 
-    @NotBlank(message = "请选择发布类型")
     private String publishType;
 
     private LocalDateTime scheduleTime;

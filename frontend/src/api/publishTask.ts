@@ -4,6 +4,7 @@ import type {
   PublishTask,
   PublishTaskPayload,
   PublishTaskQuery,
+  PublishTaskSubmitPayload,
 } from '../types/publishTask';
 
 export function getPublishTasks(params: PublishTaskQuery) {
@@ -22,8 +23,8 @@ export function updatePublishTask(id: number, data: PublishTaskPayload) {
   return request.put<unknown, ApiResult<PublishTask>>(`/publish/tasks/${id}`, data);
 }
 
-export function submitPublishTask(id: number) {
-  return request.put<unknown, ApiResult<null>>(`/publish/tasks/${id}/submit`);
+export function submitPublishTask(id: number, data: PublishTaskSubmitPayload) {
+  return request.put<unknown, ApiResult<null>>(`/publish/tasks/${id}/submit`, data);
 }
 
 export function cancelPublishTask(id: number) {

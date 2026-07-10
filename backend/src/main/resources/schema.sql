@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS publish_task (
     KEY idx_publish_task_platform (platform),
     KEY idx_publish_task_status (status),
     KEY idx_publish_task_publish_type (publish_type),
+    KEY idx_publish_task_scheduled_due (publish_type, status, schedule_time),
     KEY idx_publish_task_platform_content_id (platform_content_id),
     KEY idx_publish_task_account_id (account_id)
 );

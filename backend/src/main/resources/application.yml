@@ -25,3 +25,7 @@ mybatis-plus:
 jwt:
   secret: ai-content-marketing-system-dev-secret-please-change
   expiration: 604800000
+
+publish:
+  scheduler:
+    fixed-delay-ms: 10000

@@ -8,6 +8,7 @@ import com.aicontent.marketing.platformcontent.entity.ArticlePlatformContent;
 import com.aicontent.marketing.platformcontent.mapper.ArticlePlatformContentMapper;
 import com.aicontent.marketing.publish.dto.PublishTaskQueryRequest;
 import com.aicontent.marketing.publish.dto.PublishTaskSaveRequest;
+import com.aicontent.marketing.publish.dto.PublishTaskSubmitRequest;
 import com.aicontent.marketing.publish.entity.PublishTask;
 import com.aicontent.marketing.publish.mapper.PublishTaskMapper;
 import com.aicontent.marketing.publish.publisher.PlatformPublisher;
@@ -22,6 +23,7 @@ import com.aicontent.marketing.publish.publisher.wechat.WechatClient;
 import com.aicontent.marketing.publish.publisher.wechat.WechatPublishStatusResult;
 import com.aicontent.marketing.publish.vo.PublishTaskVO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 
 @Service
@@ -44,6 +47,8 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     private static final String STATUS_FAILED = "FAILED";
     private static final String STATUS_NEED_MANUAL_CONFIRM = "NEED_MANUAL_CONFIRM";
     private static final String STATUS_CONTENT_REJECTED = "CONTENT_REJECTED";
+    private static final String PUBLISH_TYPE_IMMEDIATE = "IMMEDIATE";
+    private static final String PUBLISH_TYPE_SCHEDULED = "SCHEDULED";
     private static final String ARTICLE_STATUS_REVIEWING = "REVIEWING";
     private static final String ARTICLE_STATUS_PUBLISHED = "PUBLISHED";
     private static final String ARTICLE_STATUS_SUBMITTED = "SUBMITTED";
@@ -151,11 +156,16 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
 
     @Override
     @Transactional
-    public void submitTask(Long id, Long currentUserId) {
+    public void submitTask(Long id, PublishTaskSubmitRequest request, Long currentUserId) {
         PublishTask task = getRequiredTask(id);
         if (!STATUS_DRAFT.equals(task.getStatus())) {
             throw new BusinessException("只有草稿状态的发布任务可以提交");
         }
+        String publishType = normalizePublishType(request == null ? null : request.getPublishType());
+        LocalDateTime scheduleTime = request == null ? null : request.getScheduleTime();
+        validateScheduleTime(publishType, scheduleTime, LocalDateTime.now());
+        task.setPublishType(publishType);
+        task.setScheduleTime(PUBLISH_TYPE_SCHEDULED.equals(publishType) ? scheduleTime : null);
         task.setStatus(STATUS_PENDING);
         task.setUpdatedBy(currentUserId);
         task.setUpdatedAt(LocalDateTime.now());
@@ -182,24 +192,63 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         if (!STATUS_PENDING.equals(task.getStatus())) {
             throw new BusinessException("只有待执行状态的发布任务可以执行");
         }
+        if (!PUBLISH_TYPE_IMMEDIATE.equals(task.getPublishType())) {
+            throw new BusinessException("定时发布任务会在计划时间自动执行");
+        }
+        if (!claimPendingTask(id, PUBLISH_TYPE_IMMEDIATE, null, currentUserId)) {
+            throw new BusinessException("发布任务已被其他执行器接管");
+        }
+        return executeClaimedTask(getRequiredTask(id), currentUserId);
+    }
 
-        ArticlePlatformContent platformContent = getRequiredPlatformContent(task.getPlatformContentId());
-        PlatformAccount account = getRequiredAccount(task.getAccountId());
-        validateTaskResources(task, platformContent, account);
-
+    @Override
+    public void executeDueScheduledTasks() {
         LocalDateTime now = LocalDateTime.now();
-        task.setStatus(STATUS_RUNNING);
-        task.setPublishUrl(null);
-        task.setExternalArticleId(null);
-        task.setExternalPublishId(null);
-        task.setArticleStatus(null);
-        task.setErrorMessage(null);
-        task.setUpdatedBy(currentUserId);
-        task.setUpdatedAt(now);
-        updateById(task);
+        List<PublishTask> dueTasks = list(new LambdaQueryWrapper<PublishTask>()
+                .eq(PublishTask::getStatus, STATUS_PENDING)
+                .eq(PublishTask::getPublishType, PUBLISH_TYPE_SCHEDULED)
+                .le(PublishTask::getScheduleTime, now)
+                .orderByAsc(PublishTask::getScheduleTime)
+                .orderByAsc(PublishTask::getId)
+                .last("LIMIT 50"));
+        for (PublishTask task : dueTasks) {
+            Long executorUserId = task.getCreatedBy();
+            if (claimPendingTask(task.getId(), PUBLISH_TYPE_SCHEDULED, now, executorUserId)) {
+                executeClaimedTask(getRequiredTask(task.getId()), executorUserId);
+            }
+        }
+    }
 
-        PlatformPublisher publisher = publisherRegistry.getPublisher(task.getPlatform(), task.getPublishMode());
+    private boolean claimPendingTask(
+            Long id,
+            String publishType,
+            LocalDateTime scheduleDeadline,
+            Long currentUserId
+    ) {
+        LambdaUpdateWrapper<PublishTask> wrapper = new LambdaUpdateWrapper<PublishTask>()
+                .eq(PublishTask::getId, id)
+                .eq(PublishTask::getStatus, STATUS_PENDING)
+                .eq(PublishTask::getPublishType, publishType)
+                .set(PublishTask::getStatus, STATUS_RUNNING)
+                .set(PublishTask::getPublishUrl, null)
+                .set(PublishTask::getExternalArticleId, null)
+                .set(PublishTask::getExternalPublishId, null)
+                .set(PublishTask::getArticleStatus, null)
+                .set(PublishTask::getErrorMessage, null)
+                .set(PublishTask::getUpdatedBy, currentUserId)
+                .set(PublishTask::getUpdatedAt, LocalDateTime.now());
+        if (scheduleDeadline != null) {
+            wrapper.le(PublishTask::getScheduleTime, scheduleDeadline);
+        }
+        return update(wrapper);
+    }
+
+    private PublishTaskVO executeClaimedTask(PublishTask task, Long currentUserId) {
         try {
+            ArticlePlatformContent platformContent = getRequiredPlatformContent(task.getPlatformContentId());
+            PlatformAccount account = getRequiredAccount(task.getAccountId());
+            validateTaskResources(task, platformContent, account);
+            PlatformPublisher publisher = publisherRegistry.getPublisher(task.getPlatform(), task.getPublishMode());
             PublishResult result = publisher.publish(toPublishContext(task, platformContent, account));
             fillExternalResult(task, result);
             if (result.submitted()) {
@@ -392,25 +441,39 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         task.setPlatform(resources.platformContent().getPlatform());
         task.setAccountId(resources.account().getId());
         task.setTitle(StringUtils.hasText(request.getTitle()) ? request.getTitle() : resources.platformContent().getTitle());
-        task.setPublishType(request.getPublishType());
-        task.setScheduleTime("SCHEDULED".equals(request.getPublishType()) ? request.getScheduleTime() : null);
+        String publishType = normalizePublishType(request.getPublishType());
+        task.setPublishType(publishType);
+        task.setScheduleTime(PUBLISH_TYPE_SCHEDULED.equals(publishType) ? request.getScheduleTime() : null);
         task.setPublishMode(resources.account().getDefaultPublishMode());
         task.setUpdatedBy(currentUserId);
         task.setUpdatedAt(now);
     }
 
     private ResolvedPublishResources validateAndResolve(PublishTaskSaveRequest request) {
-        if (!PUBLISH_TYPES.contains(request.getPublishType())) {
-            throw new BusinessException("publishType is invalid");
-        }
-        if ("SCHEDULED".equals(request.getPublishType()) && request.getScheduleTime() == null) {
-            throw new BusinessException("定时发布任务必须选择发布时间");
-        }
+        String publishType = normalizePublishType(request.getPublishType());
+        validateScheduleTime(publishType, request.getScheduleTime(), LocalDateTime.now());
 
         ArticlePlatformContent platformContent = getRequiredPlatformContent(request.getPlatformContentId());
         PlatformAccount account = getRequiredAccount(request.getAccountId());
         validatePlatformConsistency(platformContent, account);
         return new ResolvedPublishResources(platformContent, account);
+    }
+
+    private String normalizePublishType(String publishType) {
+        if (!StringUtils.hasText(publishType)) {
+            return PUBLISH_TYPE_IMMEDIATE;
+        }
+        if (!PUBLISH_TYPES.contains(publishType)) {
+            throw new BusinessException("publishType is invalid");
+        }
+        return publishType;
+    }
+
+    private void validateScheduleTime(String publishType, LocalDateTime scheduleTime, LocalDateTime now) {
+        if (PUBLISH_TYPE_SCHEDULED.equals(publishType)
+                && (scheduleTime == null || !scheduleTime.isAfter(now))) {
+            throw new BusinessException("定时发布任务必须选择未来的发布时间");
+        }
     }
 
     private ArticlePlatformContent getRequiredPlatformContent(Long id) {
