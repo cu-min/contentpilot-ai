@@ -24,7 +24,7 @@ AI内容营销系统是一个面向公司内部运营使用的内容营销自动
 | 公司内部使用 | 支持 | 不做多租户和计费 |
 | 单产品配置 | 支持 | 只推广一个产品 |
 | 国内平台发布 | 支持 | 公众号、知乎、CSDN、掘金 |
-| 发布执行 | 支持 | 当前 MVP 支持立即发布和定时发布，定时任务由后台轮询到点执行 |
+| 发布执行 | 支持 | 当前 MVP 支持立即发布和定时发布时间记录，均由运营人员手动执行 |
 | 真实平台自动发布 | 部分支持 | 微信公众号官方 API、掘金非官方接口试点、CSDN/知乎浏览器自动化已接入 |
 | 追踪链接 | 暂不支持 | 后续扩展，不纳入当前 MVP |
 | 真实数据看板 | 暂不支持 | 当前仅保留简单首页概览 |
@@ -154,7 +154,7 @@ AiModelService
 ## 7. 发布执行模块
 
 ### 7.1 模块定位
-发布执行是系统 MVP 主链路的末端能力。系统支持创建发布任务，并在提交时选择立即发布或定时发布。立即发布任务进入 `PENDING` 后由运营人员触发，定时发布任务在计划时间到达后由后台轮询执行。当前微信公众号 Publisher 走官方 API，掘金 Publisher 走非官方接口试点，CSDN 和知乎 Publisher 走 Playwright 浏览器自动化。成功后优先记录正式文章链接，无法取到正式链接但能确认成功时记录平台管理页和说明。
+发布执行是系统 MVP 主链路的末端能力。系统支持创建发布任务，并在提交时选择立即发布或定时发布。两类任务均在 `PENDING` 状态由运营人员手动执行；定时任务仅保存计划时间，当前 MVP 不轮询或自动执行。当前微信公众号 Publisher 走官方 API，掘金 Publisher 走非官方接口试点，CSDN 和知乎 Publisher 走 Playwright 浏览器自动化。成功记录发布链接，失败记录可读原因。
 
 ### 7.2 发布方式分级
 
@@ -183,8 +183,8 @@ AiModelService
 ↓
 提交为待执行
 ↓
-立即发布：触发自动发布
-定时发布：后台到点自动触发
+立即发布：运营人员手动触发
+定时发布：到达计划时间后由运营人员手动触发
 ↓
 按平台 Publisher 执行发布
 ↓
@@ -206,7 +206,7 @@ AiModelService
 初版失败后不自动重试，直接记录错误信息和失败状态。
 
 ### 7.7 发布链接获取
-当前发布成功后会优先记录正式文章链接；如果平台响应或页面状态暂时无法返回文章 URL，但能在平台管理页确认标题匹配，则记录平台管理页并提示人工查看。无法确认结果时返回 `LINK_FETCH_FAILED`。
+当前发布成功必须记录 Publisher 返回的发布链接；无法确认成功链接时，任务记为 `FAILED` 并记录原因。
 
 ## 8. 平台账号配置模块
 
@@ -451,7 +451,6 @@ com.company.marketing
 ### 16.1 登录注册
 ```text
 POST /api/auth/login
-POST /api/auth/register
 GET  /api/auth/me
 ```
 
@@ -480,7 +479,8 @@ POST /api/ai/articles/{id}/adapt-platforms
 GET    /api/articles
 GET    /api/articles/{id}
 PUT    /api/articles/{id}
-DELETE /api/articles/{id}
+PUT    /api/articles/{id}/archive
+PUT    /api/articles/{id}/restore
 GET    /api/articles/{id}/platform-contents
 ```
 
@@ -490,7 +490,8 @@ POST /api/publish/tasks
 GET  /api/publish/tasks
 GET  /api/publish/tasks/{id}
 POST /api/publish/tasks/{id}/execute
-POST /api/publish/tasks/{id}/cancel
+PUT  /api/publish/tasks/{id}/submit
+PUT  /api/publish/tasks/{id}/cancel
 ```
 
 ### 16.7 追踪链接（后续扩展）

@@ -69,11 +69,8 @@ AI内容营销系统是公司内部运营工具，前端采用科技极简的后
 - 表单保存成功后显示短提示，不跳转页面。
 - 接口失败显示后端返回 message；401 统一清登录态并跳转登录页。
 - 空状态使用简短说明，避免长篇解释。
-- 发布任务页需要按平台展示可读状态：
-  - 知乎 / CSDN 浏览器自动化执行中时提示不要操作 Chrome for Testing 窗口。
-  - `NEED_LOGIN`、`NEED_CAPTCHA`、`NEED_MANUAL_CONFIRM` 要给出明确人工动作。
-  - `FAILED`、`CONTENT_REJECTED`、`LINK_FETCH_FAILED` 要支持换行展示失败原因。
-  - “查看文章”按钮对知乎、CSDN 优先打开正式文章链接；拿不到正式链接时打开平台管理页。
+- 发布任务页只展示当前状态机中的 `DRAFT`、`PENDING`、`RUNNING`、`SUCCESS`、`FAILED`、`CANCELLED`。
+- `FAILED` 任务必须支持换行展示失败原因；`SUCCESS` 任务只在存在发布链接时显示“查看文章”。
 
 ## 10. 后续页面开发注意事项
 
