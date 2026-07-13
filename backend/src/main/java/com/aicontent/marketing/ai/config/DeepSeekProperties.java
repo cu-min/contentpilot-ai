@@ -9,9 +9,6 @@ public class DeepSeekProperties {
     @Value("${DEEPSEEK_API_URL:${DEEPSEEK_BASE_URL:https://api.deepseek.com}}")
     private String baseUrl;
 
-    @Value("${DEEPSEEK_API_KEY:}")
-    private String apiKey;
-
     @Value("${DEEPSEEK_MODEL:deepseek-chat}")
     private String model;
 
@@ -23,7 +20,7 @@ public class DeepSeekProperties {
     }
 
     public String getApiKey() {
-        return apiKey;
+        return System.getenv("DEEPSEEK_API_KEY");
     }
 
     public String getModel() {

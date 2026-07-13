@@ -2,6 +2,9 @@ server:
   port: 8080
 
 spring:
+  # 仅用于开发机的数据库等本地配置；该文件被 .gitignore 忽略，不会进入仓库。
+  config:
+    import: optional:file:./config/application-local.yml
   application:
     name: ai-content-marketing-backend
   datasource:
