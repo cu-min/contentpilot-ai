@@ -15,24 +15,16 @@ import com.aicontent.marketing.publish.publisher.PlatformPublisher;
 import com.aicontent.marketing.publish.publisher.PublishContext;
 import com.aicontent.marketing.publish.publisher.PublishResult;
 import com.aicontent.marketing.publish.publisher.PublisherRegistry;
-import com.aicontent.marketing.publish.publisher.juejin.JuejinAuthConfig;
-import com.aicontent.marketing.publish.publisher.juejin.JuejinClient;
-import com.aicontent.marketing.publish.publisher.wechat.WechatAccessTokenCache;
-import com.aicontent.marketing.publish.publisher.wechat.WechatAuthConfig;
-import com.aicontent.marketing.publish.publisher.wechat.WechatClient;
-import com.aicontent.marketing.publish.publisher.wechat.WechatPublishStatusResult;
 import com.aicontent.marketing.publish.vo.PublishTaskVO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Set;
 
 @Service
@@ -45,16 +37,11 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     private static final String STATUS_RUNNING = "RUNNING";
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_FAILED = "FAILED";
-    private static final String STATUS_NEED_MANUAL_CONFIRM = "NEED_MANUAL_CONFIRM";
-    private static final String STATUS_CONTENT_REJECTED = "CONTENT_REJECTED";
     private static final String PUBLISH_TYPE_IMMEDIATE = "IMMEDIATE";
     private static final String PUBLISH_TYPE_SCHEDULED = "SCHEDULED";
-    private static final String ARTICLE_STATUS_REVIEWING = "REVIEWING";
     private static final String ARTICLE_STATUS_PUBLISHED = "PUBLISHED";
-    private static final String ARTICLE_STATUS_SUBMITTED = "SUBMITTED";
     private static final String ARTICLE_STATUS_FAILED = "FAILED";
     private static final String ARTICLE_STATUS_CANCELLED = "CANCELLED";
-    private static final String ARTICLE_STATUS_REJECTED = "REJECTED";
 
     private static final Set<String> PLATFORMS = Set.of("WECHAT_OFFICIAL", "ZHIHU", "CSDN", "JUEJIN");
     private static final Set<String> PUBLISH_TYPES = Set.of("IMMEDIATE", "SCHEDULED");
@@ -64,38 +51,20 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
             "CANCELLED",
             "RUNNING",
             "SUCCESS",
-            "FAILED",
-            "NEED_LOGIN",
-            "NEED_CAPTCHA",
-            "NEED_MANUAL_CONFIRM",
-            "LINK_FETCH_FAILED",
-            "CONTENT_REJECTED"
+            "FAILED"
     );
 
     private final ArticlePlatformContentMapper platformContentMapper;
     private final PlatformAccountMapper platformAccountMapper;
     private final PublisherRegistry publisherRegistry;
-    private final JuejinClient juejinClient;
-    private final WechatClient wechatClient;
-    private final WechatAccessTokenCache wechatAccessTokenCache;
-    private final ObjectMapper objectMapper;
-
     public PublishTaskServiceImpl(
             ArticlePlatformContentMapper platformContentMapper,
             PlatformAccountMapper platformAccountMapper,
-            PublisherRegistry publisherRegistry,
-            JuejinClient juejinClient,
-            WechatClient wechatClient,
-            WechatAccessTokenCache wechatAccessTokenCache,
-            ObjectMapper objectMapper
+            PublisherRegistry publisherRegistry
     ) {
         this.platformContentMapper = platformContentMapper;
         this.platformAccountMapper = platformAccountMapper;
         this.publisherRegistry = publisherRegistry;
-        this.juejinClient = juejinClient;
-        this.wechatClient = wechatClient;
-        this.wechatAccessTokenCache = wechatAccessTokenCache;
-        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -192,43 +161,21 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         if (!STATUS_PENDING.equals(task.getStatus())) {
             throw new BusinessException("只有待执行状态的发布任务可以执行");
         }
-        if (!PUBLISH_TYPE_IMMEDIATE.equals(task.getPublishType())) {
-            throw new BusinessException("定时发布任务会在计划时间自动执行");
+        if (PUBLISH_TYPE_SCHEDULED.equals(task.getPublishType())
+                && task.getScheduleTime() != null
+                && task.getScheduleTime().isAfter(LocalDateTime.now())) {
+            throw new BusinessException("定时发布任务尚未到达计划时间");
         }
-        if (!claimPendingTask(id, PUBLISH_TYPE_IMMEDIATE, null, currentUserId)) {
+        if (!claimPendingTask(id, currentUserId)) {
             throw new BusinessException("发布任务已被其他执行器接管");
         }
         return executeClaimedTask(getRequiredTask(id), currentUserId);
     }
 
-    @Override
-    public void executeDueScheduledTasks() {
-        LocalDateTime now = LocalDateTime.now();
-        List<PublishTask> dueTasks = list(new LambdaQueryWrapper<PublishTask>()
-                .eq(PublishTask::getStatus, STATUS_PENDING)
-                .eq(PublishTask::getPublishType, PUBLISH_TYPE_SCHEDULED)
-                .le(PublishTask::getScheduleTime, now)
-                .orderByAsc(PublishTask::getScheduleTime)
-                .orderByAsc(PublishTask::getId)
-                .last("LIMIT 50"));
-        for (PublishTask task : dueTasks) {
-            Long executorUserId = task.getCreatedBy();
-            if (claimPendingTask(task.getId(), PUBLISH_TYPE_SCHEDULED, now, executorUserId)) {
-                executeClaimedTask(getRequiredTask(task.getId()), executorUserId);
-            }
-        }
-    }
-
-    private boolean claimPendingTask(
-            Long id,
-            String publishType,
-            LocalDateTime scheduleDeadline,
-            Long currentUserId
-    ) {
+    private boolean claimPendingTask(Long id, Long currentUserId) {
         LambdaUpdateWrapper<PublishTask> wrapper = new LambdaUpdateWrapper<PublishTask>()
                 .eq(PublishTask::getId, id)
                 .eq(PublishTask::getStatus, STATUS_PENDING)
-                .eq(PublishTask::getPublishType, publishType)
                 .set(PublishTask::getStatus, STATUS_RUNNING)
                 .set(PublishTask::getPublishUrl, null)
                 .set(PublishTask::getExternalArticleId, null)
@@ -237,9 +184,6 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
                 .set(PublishTask::getErrorMessage, null)
                 .set(PublishTask::getUpdatedBy, currentUserId)
                 .set(PublishTask::getUpdatedAt, LocalDateTime.now());
-        if (scheduleDeadline != null) {
-            wrapper.le(PublishTask::getScheduleTime, scheduleDeadline);
-        }
         return update(wrapper);
     }
 
@@ -250,27 +194,16 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
             validateTaskResources(task, platformContent, account);
             PlatformPublisher publisher = publisherRegistry.getPublisher(task.getPlatform(), task.getPublishMode());
             PublishResult result = publisher.publish(toPublishContext(task, platformContent, account));
-            fillExternalResult(task, result);
-            if (result.submitted()) {
-                task.setStatus(STATUS_RUNNING);
-                task.setPublishUrl(result.publishUrl());
-                task.setArticleStatus(ARTICLE_STATUS_SUBMITTED);
-                task.setErrorMessage(null);
-            } else if (result.success()) {
+            if (result.success() && StringUtils.hasText(result.publishUrl())) {
                 task.setStatus(STATUS_SUCCESS);
                 task.setPublishUrl(result.publishUrl());
-                task.setArticleStatus(resolveSuccessArticleStatus(result));
-                task.setErrorMessage(StringUtils.hasText(result.message()) ? result.message() : null);
-            } else if (result.blocked()) {
-                task.setStatus(result.taskStatus());
-                task.setPublishUrl(result.publishUrl());
-                task.setArticleStatus(resolveBlockedArticleStatus(result));
-                task.setErrorMessage(resolveResultMessage(result));
+                task.setArticleStatus(ARTICLE_STATUS_PUBLISHED);
+                task.setErrorMessage(null);
             } else {
                 task.setStatus(STATUS_FAILED);
                 task.setPublishUrl(null);
                 task.setArticleStatus(ARTICLE_STATUS_FAILED);
-                task.setErrorMessage(StringUtils.hasText(result.errorMessage()) ? result.errorMessage() : "发布执行失败");
+                task.setErrorMessage(resolveFailureMessage(result));
             }
         } catch (Exception exception) {
             task.setStatus(STATUS_FAILED);
@@ -284,149 +217,14 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         return toVO(task);
     }
 
-    @Override
-    @Transactional
-    public PublishTaskVO refreshArticleStatus(Long id, Long currentUserId) {
-        PublishTask task = getRequiredTask(id);
-        if ("WECHAT_OFFICIAL".equals(task.getPlatform())) {
-            return refreshWechatPublishStatus(task, currentUserId);
-        }
-        if (!"JUEJIN".equals(task.getPlatform()) || !STATUS_SUCCESS.equals(task.getStatus())) {
-            return toVO(task);
-        }
-        String articleId = resolveArticleId(task);
-        if (!StringUtils.hasText(articleId)) {
-            return refreshArticleStatusByDraftId(task, currentUserId);
-        }
-
-        PlatformAccount account = getRequiredAccount(task.getAccountId());
-        JuejinAuthConfig config = JuejinAuthConfig.parse(account.getAuthConfig(), objectMapper);
-        JuejinClient.JuejinArticleStatusResult result = juejinClient.queryArticleStatus(config, articleId);
-        fillRefreshedArticleStatus(task, result);
-        task.setUpdatedBy(currentUserId);
-        task.setUpdatedAt(LocalDateTime.now());
-        updateById(task);
-        return toVO(task);
-    }
-
-    private PublishTaskVO refreshWechatPublishStatus(PublishTask task, Long currentUserId) {
-        if (!STATUS_RUNNING.equals(task.getStatus())) {
-            throw new BusinessException("当前任务不是微信发布确认中，无需刷新");
-        }
-        if (!StringUtils.hasText(task.getExternalPublishId())) {
-            throw new BusinessException("当前任务缺少微信 publish_id，无法刷新状态");
-        }
-        PlatformAccount account = getRequiredAccount(task.getAccountId());
-        WechatAuthConfig config = WechatAuthConfig.parseForDefaultCoverUpload(account.getAuthConfig(), objectMapper);
-        String accessToken = wechatAccessTokenCache.getToken(config.appId(), config.appSecret(), wechatClient);
-        WechatPublishStatusResult result = wechatClient.getFreePublishStatus(accessToken, task.getExternalPublishId());
-        if (result.success()) {
-            task.setStatus(STATUS_SUCCESS);
-            task.setExternalArticleId(result.articleId());
-            task.setPublishUrl(result.articleUrl());
-            task.setArticleStatus(ARTICLE_STATUS_PUBLISHED);
-            task.setErrorMessage(null);
-        } else if (result.failed()) {
-            task.setStatus(STATUS_FAILED);
-            task.setArticleStatus(ARTICLE_STATUS_FAILED);
-            task.setErrorMessage(StringUtils.hasText(result.errorMessage())
-                    ? result.errorMessage()
-                    : "微信发布失败：" + result.rawSummary());
-        } else {
-            task.setStatus(STATUS_RUNNING);
-            task.setArticleStatus(ARTICLE_STATUS_REVIEWING);
-            task.setErrorMessage(null);
-        }
-        task.setUpdatedBy(currentUserId);
-        task.setUpdatedAt(LocalDateTime.now());
-        updateById(task);
-        return toVO(task);
-    }
-
-    private PublishTaskVO refreshArticleStatusByDraftId(PublishTask task, Long currentUserId) {
-        String draftId = resolveDraftId(task);
-        if (!StringUtils.hasText(draftId)) {
-            task.setArticleStatus(ARTICLE_STATUS_SUBMITTED);
-            task.setUpdatedBy(currentUserId);
-            task.setUpdatedAt(LocalDateTime.now());
-            updateById(task);
-            return toVO(task);
-        }
-        PlatformAccount account = getRequiredAccount(task.getAccountId());
-        JuejinAuthConfig config = JuejinAuthConfig.parse(account.getAuthConfig(), objectMapper);
-        JuejinClient.JuejinArticleStatusResult result = juejinClient.queryArticleStatusByDraftId(config, draftId);
-        fillRefreshedArticleStatus(task, result);
-        task.setUpdatedBy(currentUserId);
-        task.setUpdatedAt(LocalDateTime.now());
-        updateById(task);
-        return toVO(task);
-    }
-
-    private void fillRefreshedArticleStatus(PublishTask task, JuejinClient.JuejinArticleStatusResult result) {
-        task.setArticleStatus(result.articleStatus());
-        if (StringUtils.hasText(result.articleId())) {
-            task.setExternalArticleId(result.articleId());
-            task.setPublishUrl(articleUrl(result.articleId()));
-        }
-    }
-
-    private void fillExternalResult(PublishTask task, PublishResult result) {
-        if (StringUtils.hasText(result.draftId())) {
-            task.setExternalDraftId(result.draftId());
-        }
-        if (StringUtils.hasText(result.publishId())) {
-            task.setExternalPublishId(result.publishId());
-        }
-        if (StringUtils.hasText(result.draftUrl())) {
-            task.setDraftUrl(result.draftUrl());
-        }
-        if (StringUtils.hasText(result.articleId())) {
-            task.setExternalArticleId(result.articleId());
-        }
-    }
-
-    private String resolveSuccessArticleStatus(PublishResult result) {
-        if (StringUtils.hasText(result.publishUrl()) && result.publishUrl().startsWith("wechat-draft:")) {
-            return ARTICLE_STATUS_SUBMITTED;
-        }
-        if (StringUtils.hasText(result.publishUrl()) && result.publishUrl().contains("csdn.net")) {
-            return ARTICLE_STATUS_PUBLISHED;
-        }
-        if (StringUtils.hasText(result.articleId()) || StringUtils.hasText(result.publishUrl())) {
-            return ARTICLE_STATUS_REVIEWING;
-        }
-        return ARTICLE_STATUS_SUBMITTED;
-    }
-
-    private String resolveBlockedArticleStatus(PublishResult result) {
-        if (STATUS_NEED_MANUAL_CONFIRM.equals(result.taskStatus())) {
-            return ARTICLE_STATUS_SUBMITTED;
-        }
-        if (STATUS_CONTENT_REJECTED.equals(result.taskStatus())) {
-            return ARTICLE_STATUS_REJECTED;
-        }
-        return ARTICLE_STATUS_FAILED;
-    }
-
-    private String resolveResultMessage(PublishResult result) {
+    private String resolveFailureMessage(PublishResult result) {
         if (StringUtils.hasText(result.errorMessage())) {
             return result.errorMessage();
         }
         if (StringUtils.hasText(result.message())) {
             return result.message();
         }
-        return getDefaultStatusMessage(result.taskStatus());
-    }
-
-    private String getDefaultStatusMessage(String status) {
-        return switch (status) {
-            case "NEED_LOGIN" -> "需要登录后继续发布";
-            case "NEED_CAPTCHA" -> "需要人工完成验证码后继续发布";
-            case STATUS_NEED_MANUAL_CONFIRM -> "已自动填充，请人工确认发布";
-            case "LINK_FETCH_FAILED" -> "发布页面打开失败";
-            case STATUS_CONTENT_REJECTED -> "内容被平台拒绝";
-            default -> "发布执行未完成";
-        };
+        return "发布执行失败";
     }
 
     private void fillTask(
@@ -496,6 +294,9 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         if (!platformContent.getPlatform().equals(account.getPlatform())) {
             throw new BusinessException("平台发布稿和平台账号不属于同一平台");
         }
+        if (!Integer.valueOf(1).equals(account.getEnabled())) {
+            throw new BusinessException("平台账号已禁用，不能创建发布任务");
+        }
     }
 
     private void validateTaskResources(PublishTask task, ArticlePlatformContent platformContent, PlatformAccount account) {
@@ -504,6 +305,9 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         }
         if (!task.getPlatform().equals(account.getPlatform())) {
             throw new BusinessException("发布任务和平台账号不属于同一平台");
+        }
+        if (!Integer.valueOf(1).equals(account.getEnabled())) {
+            throw new BusinessException("平台账号已禁用，不能执行发布任务");
         }
     }
 
@@ -537,52 +341,6 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
             throw new BusinessException(ResultCode.NOT_FOUND, "发布任务不存在");
         }
         return task;
-    }
-
-    private String resolveArticleId(PublishTask task) {
-        if (StringUtils.hasText(task.getExternalArticleId())) {
-            return task.getExternalArticleId();
-        }
-        if (!StringUtils.hasText(task.getPublishUrl())) {
-            return "";
-        }
-        String marker = "/post/";
-        int index = task.getPublishUrl().indexOf(marker);
-        if (index < 0) {
-            return "";
-        }
-        String articleId = task.getPublishUrl().substring(index + marker.length());
-        int queryIndex = articleId.indexOf('?');
-        return queryIndex >= 0 ? articleId.substring(0, queryIndex) : articleId;
-    }
-
-    private String resolveDraftId(PublishTask task) {
-        if (StringUtils.hasText(task.getExternalDraftId())) {
-            return task.getExternalDraftId();
-        }
-        String draftId = resolveDraftIdFromUrl(task.getDraftUrl());
-        if (StringUtils.hasText(draftId)) {
-            return draftId;
-        }
-        return resolveDraftIdFromUrl(task.getPublishUrl());
-    }
-
-    private String resolveDraftIdFromUrl(String url) {
-        if (!StringUtils.hasText(url)) {
-            return "";
-        }
-        String marker = "/editor/drafts/";
-        int index = url.indexOf(marker);
-        if (index < 0) {
-            return "";
-        }
-        String draftId = url.substring(index + marker.length());
-        int queryIndex = draftId.indexOf('?');
-        return queryIndex >= 0 ? draftId.substring(0, queryIndex) : draftId;
-    }
-
-    private String articleUrl(String articleId) {
-        return "https://juejin.cn/post/" + articleId;
     }
 
     private PublishTaskVO toVO(PublishTask task) {

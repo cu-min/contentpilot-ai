@@ -34,7 +34,3 @@ export function cancelPublishTask(id: number) {
 export function executePublishTask(id: number) {
   return request.post<unknown, ApiResult<PublishTask>>(`/publish/tasks/${id}/execute`);
 }
-
-export function refreshPublishTaskStatus(id: number) {
-  return request.post<unknown, ApiResult<PublishTask>>(`/publish/tasks/${id}/refresh-status`);
-}

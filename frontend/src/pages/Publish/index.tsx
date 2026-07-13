@@ -27,7 +27,6 @@ import {
   executePublishTask,
   getPublishTaskDetail,
   getPublishTasks,
-  refreshPublishTaskStatus,
   submitPublishTask,
   updatePublishTask,
 } from '../../api/publishTask';
@@ -83,7 +82,6 @@ export default function Publish() {
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [executingTaskId, setExecutingTaskId] = useState<number | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   const [submittingTask, setSubmittingTask] = useState<PublishTask | null>(null);
@@ -164,16 +162,6 @@ export default function Publish() {
     void loadArticles();
     void loadAccounts();
   }, []);
-
-  useEffect(() => {
-    if (!tasks.some((task) => task.status === 'PENDING' && task.publishType === 'SCHEDULED')) {
-      return undefined;
-    }
-    const timer = window.setInterval(() => {
-      void loadTasks(pagination.current, pagination.pageSize);
-    }, 10000);
-    return () => window.clearInterval(timer);
-  }, [tasks, pagination.current, pagination.pageSize]);
 
   useEffect(() => {
     if (!selectedArticleId) {
@@ -351,14 +339,6 @@ export default function Publish() {
         } else {
           message.success('自动发布成功');
         }
-      } else if (result.data.status === 'RUNNING' && result.data.platform === 'WECHAT_OFFICIAL' && result.data.externalPublishId) {
-        message.info('已提交微信发布，等待平台确认');
-      } else if (result.data.status === 'NEED_MANUAL_CONFIRM') {
-        message.info(result.data.errorMessage || '已自动填充，请在 Chrome for Testing 中检查并手动发布。');
-      } else if (result.data.status === 'NEED_LOGIN') {
-        message.warning(result.data.errorMessage || '需要登录后重新执行发布');
-      } else if (result.data.status === 'NEED_CAPTCHA') {
-        message.warning(result.data.errorMessage || '需要人工完成验证码后重新执行发布');
       } else {
         message.error(`自动发布失败：${result.data.errorMessage || getPublishTaskStatusLabel(result.data.status) || '发布失败'}`);
       }
@@ -370,74 +350,13 @@ export default function Publish() {
     }
   };
 
-  const handleRefreshStatus = async () => {
-    setRefreshing(true);
-    try {
-      const refreshableTasks = tasks.filter((task) => (
-        (
-          task.platform === 'WECHAT_OFFICIAL'
-          && task.status === 'RUNNING'
-          && Boolean(task.externalPublishId)
-        )
-        || (
-          task.platform === 'JUEJIN'
-          && task.status === 'SUCCESS'
-          && Boolean(task.externalArticleId || task.publishUrl || task.externalDraftId || task.draftUrl)
-        )
-      ));
-      if (refreshableTasks.length > 0) {
-        const results = await Promise.allSettled(
-          refreshableTasks.map((task) => refreshPublishTaskStatus(task.id)),
-        );
-        const failedCount = results.filter((result) => result.status === 'rejected').length;
-        const fulfilled = results
-          .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof refreshPublishTaskStatus>>> => result.status === 'fulfilled')
-          .map((result) => result.value.data);
-        const wechatSuccessCount = fulfilled.filter((task) => task.platform === 'WECHAT_OFFICIAL' && task.status === 'SUCCESS').length;
-        const wechatProcessingCount = fulfilled.filter((task) => task.platform === 'WECHAT_OFFICIAL' && task.status === 'RUNNING').length;
-        const wechatFailedCount = fulfilled.filter((task) => task.platform === 'WECHAT_OFFICIAL' && isFailureStatus(task.status)).length;
-        if (wechatSuccessCount > 0) {
-          message.success(`${wechatSuccessCount} 条微信公众号发布成功`);
-        }
-        if (wechatProcessingCount > 0) {
-          message.info('微信发布仍在处理中，请稍后刷新');
-        }
-        if (wechatFailedCount > 0) {
-          message.error(`${wechatFailedCount} 条微信公众号发布失败`);
-        }
-        if (failedCount > 0) {
-          message.warning(`${failedCount} 条任务状态刷新失败，请稍后重试`);
-        }
-      } else {
-        message.info('当前列表没有需要同步的平台状态');
-      }
-      const success = await loadTasks(pagination.current, pagination.pageSize);
-      if (success && refreshableTasks.length === 0) {
-        message.success('状态已刷新');
-      }
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const isFailureStatus = (status: PublishTaskStatus) => (
-    [
-      'FAILED',
-      'NEED_LOGIN',
-      'NEED_CAPTCHA',
-      'LINK_FETCH_FAILED',
-      'CONTENT_REJECTED',
-    ] as PublishTaskStatus[]
-  ).includes(status);
-
-  const isManualConfirmStatus = (status: PublishTaskStatus) => status === 'NEED_MANUAL_CONFIRM';
+  const isFailureStatus = (status: PublishTaskStatus) => status === 'FAILED';
 
   const statusColor = (status: PublishTaskStatus) => {
     if (status === 'DRAFT') return 'default';
     if (status === 'PENDING') return 'processing';
     if (status === 'RUNNING') return 'blue';
     if (status === 'SUCCESS') return 'success';
-    if (isManualConfirmStatus(status)) return 'warning';
     if (isFailureStatus(status)) return 'error';
     if (status === 'CANCELLED') return 'warning';
     return 'default';
@@ -445,32 +364,11 @@ export default function Publish() {
 
   const articleStatus = (record: PublishTask) => {
     if (record.status === 'DRAFT' || record.status === 'PENDING') return null;
-    if (record.status === 'RUNNING' && record.platform === 'WECHAT_OFFICIAL' && record.externalPublishId) {
-      return { label: '微信确认中', color: 'blue' };
-    }
-    if (record.status === 'RUNNING' && record.platform === 'CSDN') {
-      return { label: 'CSDN 自动化中', color: 'blue' };
-    }
-    if (record.status === 'RUNNING' && record.platform === 'ZHIHU') {
-      return { label: '知乎自动化中', color: 'blue' };
-    }
     if (record.status === 'RUNNING') return { label: '发布中', color: 'blue' };
     if (record.articleStatus === 'PUBLISHED') return { label: '已发布', color: 'success' };
-    if (record.articleStatus === 'REJECTED') return { label: '未通过', color: 'error' };
     if (record.articleStatus === 'FAILED') return { label: '发布失败', color: 'error' };
     if (record.articleStatus === 'CANCELLED') return { label: '已取消', color: 'default' };
-    if (record.articleStatus === 'SUBMITTED') return { label: '已提交，待取链', color: 'warning' };
-    if (record.articleStatus === 'REVIEWING') {
-      return { label: '审核中', color: 'warning' };
-    }
-    if (record.status === 'SUCCESS' && (isOfficialArticleUrl(record.publishUrl) || record.externalArticleId)) {
-      return { label: '审核中', color: 'warning' };
-    }
-    if (record.status === 'SUCCESS') return { label: '已提交，待取链', color: 'warning' };
-    if (record.status === 'CONTENT_REJECTED') return { label: '未通过', color: 'error' };
-    if (record.status === 'NEED_LOGIN') return { label: '需登录', color: 'error' };
-    if (record.status === 'NEED_CAPTCHA') return { label: '需验证码', color: 'error' };
-    if (record.status === 'NEED_MANUAL_CONFIRM') return { label: '待人工确认', color: 'warning' };
+    if (record.status === 'SUCCESS') return { label: '已发布', color: 'success' };
     if (record.status === 'CANCELLED') return { label: '已取消', color: 'default' };
     if (isFailureStatus(record.status)) return { label: '发布失败', color: 'error' };
     return { label: getPublishTaskStatusLabel(record.status), color: statusColor(record.status) };
@@ -539,13 +437,6 @@ export default function Publish() {
     });
   };
 
-  const handleViewManualConfirm = (record: PublishTask) => {
-    Modal.info({
-      title: '人工确认',
-      content: record.errorMessage || '已自动填充，请在 Chrome for Testing 中检查并手动发布。',
-    });
-  };
-
   const compactFailureText = (record: PublishTask) => {
     const text = (record.errorMessage || getPublishTaskStatusLabel(record.status) || '请查看失败原因')
       .replace(/\s+/g, ' ')
@@ -586,16 +477,6 @@ export default function Publish() {
     }
 
     if (record.status === 'PENDING') {
-      if (record.publishType === 'SCHEDULED') {
-        return (
-          <Space size={8} wrap>
-            <Typography.Text type="secondary">等待定时发布</Typography.Text>
-            <Popconfirm title="确认取消该定时发布任务？" okText="取消任务" cancelText="返回" onConfirm={() => handleCancel(record)}>
-              <Button size="small">取消</Button>
-            </Popconfirm>
-          </Space>
-        );
-      }
       return (
         <Space size={8} wrap>
           <Popconfirm title="确认自动发布该文章？" okText="自动发布" cancelText="取消" onConfirm={() => handleExecute(record)}>
@@ -616,16 +497,6 @@ export default function Publish() {
 
     if (record.status === 'SUCCESS') {
       return <Button size="small" type={record.platform === 'CSDN' || record.platform === 'ZHIHU' ? 'primary' : 'default'} onClick={() => handleViewResult(record)}>查看文章</Button>;
-    }
-
-    if (record.status === 'NEED_MANUAL_CONFIRM') {
-      if (record.platform === 'ZHIHU') {
-        return <Button size="small" type="primary" onClick={() => handleViewResult(record)}>查看文章</Button>;
-      }
-      if (record.platform === 'CSDN') {
-        return <Button size="small" type="primary" onClick={() => handleViewResult(record)}>查看文章</Button>;
-      }
-      return <Button size="small" onClick={() => handleViewManualConfirm(record)}>查看提示</Button>;
     }
 
     if (isFailureStatus(record.status)) {
@@ -731,9 +602,6 @@ export default function Publish() {
         if (record.status === 'SUCCESS' && isWechatDraftUrl(record.publishUrl)) {
           return <Typography.Text>草稿创建成功</Typography.Text>;
         }
-        if (record.status === 'RUNNING' && record.platform === 'WECHAT_OFFICIAL' && record.externalPublishId) {
-          return <Typography.Text>微信发布确认中</Typography.Text>;
-        }
         if (record.status === 'RUNNING' && record.platform === 'CSDN') {
           return (
             <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
@@ -750,55 +618,8 @@ export default function Publish() {
             </Space>
           );
         }
-        if (record.status === 'NEED_MANUAL_CONFIRM') {
-          if (record.platform === 'ZHIHU') {
-            return (
-              <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
-                <Typography.Text type="warning">已自动填充知乎编辑器</Typography.Text>
-                <Typography.Text type="secondary">请切换到 Chrome for Testing 窗口检查并手动发布。</Typography.Text>
-              </Space>
-            );
-          }
-          if (record.platform === 'CSDN') {
-            return (
-              <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
-                <Typography.Text type="warning">已自动填充 CSDN 编辑器</Typography.Text>
-                <Typography.Text type="secondary">请切换到 Chrome for Testing 窗口检查内容并手动发布。</Typography.Text>
-                <Typography.Text type="secondary">如未看到按钮，请滚动到底部右下角查看“保存草稿 / 发布文章”。</Typography.Text>
-              </Space>
-            );
-          }
-          return (
-            <Space direction="vertical" size={2}>
-              <Typography.Text type="warning" ellipsis={{ tooltip: record.errorMessage }}>
-                {record.errorMessage || '已自动填充，请在 Chrome for Testing 中检查并手动发布。'}
-              </Typography.Text>
-              {record.publishUrl ? (
-                <Typography.Link href={record.publishUrl} target="_blank" rel="noreferrer">
-                  打开编辑器
-                </Typography.Link>
-              ) : null}
-            </Space>
-          );
-        }
         if (isFailureStatus(record.status)) {
           if (record.platform === 'ZHIHU') {
-            if (record.status === 'NEED_LOGIN') {
-              return (
-                <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
-                  <Typography.Text type="danger">知乎登录状态失效</Typography.Text>
-                  <Typography.Text type="secondary">请在打开的浏览器中完成登录后重新执行发布任务。</Typography.Text>
-                </Space>
-              );
-            }
-            if (record.status === 'NEED_CAPTCHA') {
-              return (
-                <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
-                  <Typography.Text type="danger">知乎需要验证码或安全验证</Typography.Text>
-                  <Typography.Text type="secondary">请人工处理后重新执行。</Typography.Text>
-                </Space>
-              );
-            }
             return (
               <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
                 <Typography.Text type="danger">知乎发布失败</Typography.Text>
@@ -885,7 +706,6 @@ export default function Publish() {
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Typography.Text strong>发布任务列表</Typography.Text>
             <Space>
-              <Button loading={refreshing} onClick={handleRefreshStatus}>刷新状态</Button>
               <Button type="primary" onClick={() => openCreate()}>创建发布任务</Button>
             </Space>
           </Space>
