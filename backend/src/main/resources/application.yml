@@ -2,14 +2,12 @@ server:
   port: 8080
 
 spring:
-  config:
-    import: optional:file:./config/application-local.yml
   application:
     name: ai-content-marketing-backend
   datasource:
-    url: jdbc:mysql://localhost:3306/ai_content_marketing?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
-    username: root
-    password: 123456
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:ai_content_marketing}?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver
   sql:
     init:
@@ -23,9 +21,5 @@ mybatis-plus:
       id-type: auto
 
 jwt:
-  secret: ai-content-marketing-system-dev-secret-please-change
+  secret: ${JWT_SECRET:}
   expiration: 604800000
-
-publish:
-  scheduler:
-    fixed-delay-ms: 10000

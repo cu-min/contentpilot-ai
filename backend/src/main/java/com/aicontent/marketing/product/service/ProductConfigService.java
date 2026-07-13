@@ -1,11 +1,9 @@
 package com.aicontent.marketing.product.service;
 
 import com.aicontent.marketing.product.dto.ProductConfigSaveRequest;
-import com.aicontent.marketing.product.entity.ProductConfig;
 import com.aicontent.marketing.product.vo.ProductConfigVO;
 import com.baomidou.mybatisplus.extension.service.IService;
-
-import java.util.List;
+import com.aicontent.marketing.product.entity.ProductConfig;
 
 public interface ProductConfigService extends IService<ProductConfig> {
 
@@ -13,13 +11,4 @@ public interface ProductConfigService extends IService<ProductConfig> {
 
     ProductConfigVO saveCurrentConfig(ProductConfigSaveRequest request);
 
-    List<ProductConfigVO> listConfigs();
-
-    ProductConfigVO getConfig(Long id);
-
-    ProductConfigVO createConfig(ProductConfigSaveRequest request);
-
-    ProductConfigVO updateConfig(Long id, ProductConfigSaveRequest request);
-
-    void deleteConfig(Long id);
 }

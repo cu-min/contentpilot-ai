@@ -1,8 +1,8 @@
 import { Alert, Button, Descriptions, Form, Input, Select, Space, Typography, message } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { generateArticle } from '../../../api/ai';
-import { listProductConfigs } from '../../../api/productConfig';
+import { getProductConfig } from '../../../api/productConfig';
 import PageContainer from '../../../components/PageContainer';
 import SectionCard from '../../../components/SectionCard';
 import type { AiArticleGenerateRequest } from '../../../types/ai';
@@ -20,21 +20,15 @@ const { TextArea } = Input;
 export default function ArticleAiGenerate() {
   const navigate = useNavigate();
   const [form] = Form.useForm<AiArticleGenerateRequest>();
-  const selectedProductId = Form.useWatch('productConfigId', form);
-  const [productConfigs, setProductConfigs] = useState<ProductConfig[]>([]);
+  const [productConfig, setProductConfig] = useState<ProductConfig | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [generating, setGenerating] = useState(false);
 
-  const selectedProduct = useMemo(
-    () => productConfigs.find((product) => product.id === selectedProductId) || null,
-    [productConfigs, selectedProductId],
-  );
-
-  const loadProductConfigs = async () => {
+  const loadProductConfig = async () => {
     setLoadingConfig(true);
     try {
-      const result = await listProductConfigs();
-      setProductConfigs(result.data || []);
+      const result = await getProductConfig();
+      setProductConfig(result.data?.id ? result.data : null);
     } catch (error) {
       message.error(error instanceof Error ? error.message : '产品配置加载失败');
     } finally {
@@ -47,7 +41,7 @@ export default function ArticleAiGenerate() {
       type: 'INDUSTRY_KNOWLEDGE',
       language: 'ZH',
     });
-    void loadProductConfigs();
+    void loadProductConfig();
   }, [form]);
 
   const handleFinish = async (values: AiArticleGenerateRequest) => {
@@ -67,7 +61,7 @@ export default function ArticleAiGenerate() {
   return (
     <PageContainer
       title="AI生成文章"
-      description="输入一个主题，就能生成一篇可编辑的营销文章；选择产品后，内容会更贴近你的品牌表达。"
+      description="输入一个主题，基于当前产品配置生成一篇可编辑的营销文章。"
     >
       <Form
         form={form}
@@ -81,34 +75,18 @@ export default function ArticleAiGenerate() {
               <Typography.Text strong>关联产品</Typography.Text>
               <Button onClick={() => navigate('/product')}>前往产品配置</Button>
             </Space>
-            <Form.Item
-              label="选择产品"
-              name="productConfigId"
-              extra="可选。不选择产品时，AI 将按文章主题直接生成，不会编造具体产品功能。"
-            >
-              <Select
-                allowClear
-                showSearch
-                placeholder="不选择产品，直接按主题生成"
-                optionFilterProp="label"
-                options={productConfigs.map((product) => ({
-                  value: product.id,
-                  label: product.productName,
-                }))}
-              />
-            </Form.Item>
-            {selectedProduct ? (
+            {productConfig ? (
               <Descriptions column={{ xs: 1, md: 2 }} size="small">
-                <Descriptions.Item label="产品名称">{selectedProduct.productName || '-'}</Descriptions.Item>
-                <Descriptions.Item label="品牌语气">{selectedProduct.brandTone || '-'}</Descriptions.Item>
-                <Descriptions.Item label="目标用户">{selectedProduct.targetUsers || '-'}</Descriptions.Item>
-                <Descriptions.Item label="官网链接">{selectedProduct.officialUrl || '-'}</Descriptions.Item>
+                <Descriptions.Item label="产品名称">{productConfig.productName || '-'}</Descriptions.Item>
+                <Descriptions.Item label="品牌语气">{productConfig.brandTone || '-'}</Descriptions.Item>
+                <Descriptions.Item label="目标用户">{productConfig.targetUsers || '-'}</Descriptions.Item>
+                <Descriptions.Item label="官网链接">{productConfig.officialUrl || '-'}</Descriptions.Item>
               </Descriptions>
             ) : (
               <Alert
-                type="info"
+                type="warning"
                 showIcon
-                message="当前未关联产品，将按文章主题生成通用内容。"
+                message="请先完成产品配置，系统才会开始生成文章。"
               />
             )}
           </Space>
@@ -166,7 +144,6 @@ export default function ArticleAiGenerate() {
             </Button>
             <Button
               onClick={() => form.setFieldsValue({
-                productConfigId: undefined,
                 topic: undefined,
                 type: 'INDUSTRY_KNOWLEDGE',
                 language: 'ZH',

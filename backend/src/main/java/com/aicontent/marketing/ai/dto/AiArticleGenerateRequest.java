@@ -8,8 +8,6 @@ import lombok.Data;
 @Data
 public class AiArticleGenerateRequest {
 
-    private Long productConfigId;
-
     @NotBlank(message = "topic is required")
     @Size(max = 200, message = "topic must be less than 200 characters")
     private String topic;

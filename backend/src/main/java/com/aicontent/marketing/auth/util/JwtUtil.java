@@ -6,6 +6,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
@@ -57,6 +58,9 @@ public class JwtUtil {
     }
 
     private SecretKey getSigningKey() {
+        if (!StringUtils.hasText(secret) || secret.length() < 32) {
+            throw new IllegalStateException("JWT_SECRET 未配置或长度不足 32 个字符");
+        }
         return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     }
 }

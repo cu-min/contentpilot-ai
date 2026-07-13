@@ -17,7 +17,7 @@ public class AiJsonParser {
 
     public AiGeneratedArticle parseGeneratedArticle(String rawResult) {
         try {
-            AiGeneratedArticle article = objectMapper.readValue(cleanJson(rawResult), AiGeneratedArticle.class);
+            AiGeneratedArticle article = objectMapper.readValue(extractJsonObject(rawResult), AiGeneratedArticle.class);
             if (!StringUtils.hasText(article.getTitle()) || !StringUtils.hasText(article.getContent())) {
                 throw new BusinessException("AI 返回格式解析失败，请重试");
             }
@@ -29,7 +29,7 @@ public class AiJsonParser {
         }
     }
 
-    private String cleanJson(String rawResult) {
+    private String extractJsonObject(String rawResult) {
         if (!StringUtils.hasText(rawResult)) {
             throw new BusinessException("AI 返回内容为空，请重试");
         }
@@ -43,6 +43,35 @@ public class AiJsonParser {
         if (content.endsWith("```")) {
             content = content.substring(0, content.length() - 3).trim();
         }
-        return content;
+
+        int start = content.indexOf('{');
+        if (start < 0) {
+            throw new BusinessException("AI 返回格式解析失败，请重试");
+        }
+
+        boolean inString = false;
+        boolean escaped = false;
+        int depth = 0;
+        for (int index = start; index < content.length(); index++) {
+            char current = content.charAt(index);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (current == '\\') {
+                    escaped = true;
+                } else if (current == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (current == '"') {
+                inString = true;
+            } else if (current == '{') {
+                depth++;
+            } else if (current == '}' && --depth == 0) {
+                return content.substring(start, index + 1);
+            }
+        }
+        throw new BusinessException("AI 返回格式解析失败，请重试");
     }
 }

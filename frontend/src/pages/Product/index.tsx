@@ -1,12 +1,7 @@
-import { Button, Form, Input, Modal, Popconfirm, Space, Table, Typography, message } from 'antd';
+import { Button, Form, Input, Modal, Space, Table, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useEffect, useState } from 'react';
-import {
-  createProductConfig,
-  deleteProductConfig,
-  listProductConfigs,
-  updateProductConfig,
-} from '../../api/productConfig';
+import { getProductConfig, saveProductConfig } from '../../api/productConfig';
 import PageContainer from '../../components/PageContainer';
 import SectionCard from '../../components/SectionCard';
 import type { ProductConfig } from '../../types/product';
@@ -17,17 +12,16 @@ const { TextArea } = Input;
 
 export default function Product() {
   const [form] = Form.useForm<ProductConfig>();
-  const [products, setProducts] = useState<ProductConfig[]>([]);
+  const [product, setProduct] = useState<ProductConfig | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<ProductConfig | null>(null);
 
-  const loadProducts = async () => {
+  const loadProduct = async () => {
     setLoading(true);
     try {
-      const result = await listProductConfigs();
-      setProducts(result.data || []);
+      const result = await getProductConfig();
+      setProduct(result.data?.id ? result.data : null);
     } catch (error) {
       message.error(error instanceof Error ? error.message : '产品配置加载失败');
     } finally {
@@ -36,18 +30,11 @@ export default function Product() {
   };
 
   useEffect(() => {
-    void loadProducts();
+    void loadProduct();
   }, []);
 
-  const openCreateModal = () => {
-    setEditingProduct(null);
-    form.resetFields();
-    setModalOpen(true);
-  };
-
-  const openEditModal = (product: ProductConfig) => {
-    setEditingProduct(product);
-    form.setFieldsValue(product);
+  const openEditModal = () => {
+    form.setFieldsValue(product || {});
     setModalOpen(true);
   };
 
@@ -55,31 +42,15 @@ export default function Product() {
     const values = await form.validateFields();
     setSaving(true);
     try {
-      if (editingProduct?.id) {
-        await updateProductConfig(editingProduct.id, values);
-        message.success('产品配置已更新');
-      } else {
-        await createProductConfig(values);
-        message.success('产品配置已新增');
-      }
+      await saveProductConfig(values);
+      message.success('产品配置已保存');
       setModalOpen(false);
-      setEditingProduct(null);
       form.resetFields();
-      await loadProducts();
+      await loadProduct();
     } catch (error) {
-      message.error(formatFailure(editingProduct ? '更新' : '新增', error));
+      message.error(formatFailure('保存', error));
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleDelete = async (id: number) => {
-    try {
-      await deleteProductConfig(id);
-      message.success('产品配置已删除');
-      await loadProducts();
-    } catch (error) {
-      message.error(formatFailure('删除', error));
     }
   };
 
@@ -123,23 +94,10 @@ export default function Product() {
       title: '操作',
       key: 'actions',
       width: 170,
-      render: (_, record) => (
-        <Space size={8} wrap={false}>
-          <Button type="primary" size="small" onClick={() => openEditModal(record)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title="删除产品配置"
-            description="删除后 AI 生成将无法再选择该产品。确定删除吗？"
-            okText="删除"
-            cancelText="取消"
-            onConfirm={() => record.id && handleDelete(record.id)}
-          >
-            <Button size="small" danger>
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
+      render: () => (
+        <Button type="primary" size="small" onClick={openEditModal}>
+          编辑
+        </Button>
       ),
     },
   ];
@@ -152,15 +110,15 @@ export default function Product() {
       <SectionCard>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-            <Typography.Text strong>产品列表</Typography.Text>
-            <Button type="primary" onClick={openCreateModal}>
-              新增产品
+            <Typography.Text strong>当前产品配置</Typography.Text>
+            <Button type="primary" onClick={openEditModal}>
+              {product ? '编辑产品配置' : '配置产品'}
             </Button>
           </Space>
         <Table
           rowKey={(record) => String(record.id)}
           columns={columns}
-          dataSource={products}
+          dataSource={product ? [product] : []}
           loading={loading}
           pagination={{ pageSize: 10 }}
         />
@@ -168,12 +126,11 @@ export default function Product() {
       </SectionCard>
 
       <Modal
-        title={editingProduct ? '编辑产品配置' : '新增产品配置'}
+        title={product ? '编辑产品配置' : '配置产品'}
         open={modalOpen}
         onOk={() => void handleSubmit()}
         onCancel={() => {
           setModalOpen(false);
-          setEditingProduct(null);
           form.resetFields();
         }}
         confirmLoading={saving}

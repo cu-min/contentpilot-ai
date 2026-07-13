@@ -14,7 +14,6 @@ import org.springframework.util.StringUtils;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.LocalDateTime;
-import java.util.List;
 
 @Service
 public class ProductConfigServiceImpl extends ServiceImpl<ProductConfigMapper, ProductConfig> implements ProductConfigService {
@@ -31,62 +30,17 @@ public class ProductConfigServiceImpl extends ServiceImpl<ProductConfigMapper, P
         ProductConfig config = getFirstConfig();
 
         if (config == null) {
-            return createConfig(request);
+            LocalDateTime now = LocalDateTime.now();
+            config = new ProductConfig();
+            config.setCreatedAt(now);
+            fillConfig(config, request, now);
+            save(config);
+            return ProductConfigVO.from(config);
         }
 
-        return updateConfig(config.getId(), request);
-    }
-
-    @Override
-    public List<ProductConfigVO> listConfigs() {
-        return list(new LambdaQueryWrapper<ProductConfig>()
-                .orderByDesc(ProductConfig::getUpdatedAt)
-                .orderByDesc(ProductConfig::getId))
-                .stream()
-                .map(ProductConfigVO::from)
-                .toList();
-    }
-
-    @Override
-    public ProductConfigVO getConfig(Long id) {
-        ProductConfig config = getById(id);
-        if (config == null) {
-            throw new BusinessException("产品配置不存在");
-        }
-        return ProductConfigVO.from(config);
-    }
-
-    @Override
-    @Transactional
-    public ProductConfigVO createConfig(ProductConfigSaveRequest request) {
-        validateOfficialUrl(request.getOfficialUrl());
-        ProductConfig config = new ProductConfig();
-        LocalDateTime now = LocalDateTime.now();
-        config.setCreatedAt(now);
-        fillConfig(config, request, now);
-        save(config);
-        return ProductConfigVO.from(config);
-    }
-
-    @Override
-    @Transactional
-    public ProductConfigVO updateConfig(Long id, ProductConfigSaveRequest request) {
-        validateOfficialUrl(request.getOfficialUrl());
-        ProductConfig config = getById(id);
-        if (config == null) {
-            throw new BusinessException("产品配置不存在");
-        }
         fillConfig(config, request, LocalDateTime.now());
         updateById(config);
         return ProductConfigVO.from(config);
-    }
-
-    @Override
-    @Transactional
-    public void deleteConfig(Long id) {
-        if (!removeById(id)) {
-            throw new BusinessException("产品配置不存在");
-        }
     }
 
     private ProductConfig getFirstConfig() {

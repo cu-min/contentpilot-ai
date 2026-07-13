@@ -1,7 +1,6 @@
 import type { ArticleLanguage, ArticleType } from './article';
 
 export interface AiArticleGenerateRequest {
-  productConfigId?: number;
   topic: string;
   type: ArticleType;
   language: ArticleLanguage;
