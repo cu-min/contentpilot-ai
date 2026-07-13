@@ -50,6 +50,30 @@ export const publishModeOptions = [
   { label: '人工确认', value: 'MANUAL_CONFIRM' },
 ] as const;
 
+const platformAuthTypes: Record<PlatformContentPlatform, PlatformAuthType[]> = {
+  WECHAT_OFFICIAL: ['APP_SECRET'],
+  JUEJIN: ['COOKIE'],
+  CSDN: ['BROWSER_PROFILE'],
+  ZHIHU: ['BROWSER_PROFILE'],
+};
+
+const platformPublishModes: Record<PlatformContentPlatform, PublishMode[]> = {
+  WECHAT_OFFICIAL: ['OFFICIAL_API'],
+  JUEJIN: ['UNOFFICIAL_API'],
+  CSDN: ['BROWSER_AUTOMATION', 'MANUAL_CONFIRM'],
+  ZHIHU: ['BROWSER_AUTOMATION', 'MANUAL_CONFIRM'],
+};
+
+export function getPlatformAuthTypeOptions(platform?: PlatformContentPlatform) {
+  const allowed = platform ? platformAuthTypes[platform] : authTypeOptions.map((option) => option.value);
+  return authTypeOptions.filter((option) => allowed.includes(option.value));
+}
+
+export function getPlatformPublishModeOptions(platform?: PlatformContentPlatform) {
+  const allowed = platform ? platformPublishModes[platform] : publishModeOptions.map((option) => option.value);
+  return publishModeOptions.filter((option) => allowed.includes(option.value));
+}
+
 export function getAuthTypeLabel(type?: string) {
   return authTypeOptions.find((option) => option.value === type)?.label || type || '-';
 }

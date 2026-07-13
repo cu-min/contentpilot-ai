@@ -27,15 +27,16 @@ import PageContainer from '../../components/PageContainer';
 import SectionCard from '../../components/SectionCard';
 import type { PlatformAccount, PlatformAccountPayload } from '../../types/platformAccount';
 import {
-  authTypeOptions,
   getAuthTypeLabel,
+  getPlatformAuthTypeOptions,
+  getPlatformPublishModeOptions,
   getPublishModeLabel,
-  publishModeOptions,
 } from '../../types/platformAccount';
 import {
   getPlatformContentPlatformLabel,
   platformContentOptions,
 } from '../../types/platformContent';
+import type { PlatformContentPlatform } from '../../types/platformContent';
 import { formatDateTime } from '../../utils/datetime';
 import { formatFailure } from '../../utils/feedback';
 
@@ -45,6 +46,7 @@ const coverMaxSize = 2 * 1024 * 1024;
 
 export default function Platform() {
   const [form] = Form.useForm<PlatformAccountPayload>();
+  const selectedPlatform = Form.useWatch('platform', form) as PlatformContentPlatform | undefined;
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -301,14 +303,14 @@ export default function Platform() {
             name="authType"
             rules={[{ required: true, message: '请选择认证方式' }]}
           >
-            <Select options={[...authTypeOptions]} />
+            <Select options={getPlatformAuthTypeOptions(selectedPlatform)} />
           </Form.Item>
           <Form.Item
             label="默认发布方式"
             name="defaultPublishMode"
             rules={[{ required: true, message: '请选择默认发布方式' }]}
           >
-            <Select options={[...publishModeOptions]} />
+            <Select options={getPlatformPublishModeOptions(selectedPlatform)} />
           </Form.Item>
           <Form.Item
             label="认证配置"

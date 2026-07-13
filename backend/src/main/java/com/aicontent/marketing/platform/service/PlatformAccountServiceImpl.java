@@ -26,6 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.time.LocalDateTime;
 import java.util.Locale;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -37,6 +38,18 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
     private static final Set<String> PUBLISH_MODES = Set.of("OFFICIAL_API", "UNOFFICIAL_API", "BROWSER_AUTOMATION", "MANUAL_CONFIRM");
     private static final Set<String> BROWSER_PLATFORMS = Set.of("CSDN", "ZHIHU");
     private static final Set<String> BROWSER_PUBLISH_MODES = Set.of("BROWSER_AUTOMATION", "MANUAL_CONFIRM");
+    private static final Map<String, Set<String>> PLATFORM_AUTH_TYPES = Map.of(
+            "WECHAT_OFFICIAL", Set.of("APP_SECRET"),
+            "JUEJIN", Set.of("COOKIE"),
+            "CSDN", Set.of("BROWSER_PROFILE"),
+            "ZHIHU", Set.of("BROWSER_PROFILE")
+    );
+    private static final Map<String, Set<String>> PLATFORM_PUBLISH_MODES = Map.of(
+            "WECHAT_OFFICIAL", Set.of("OFFICIAL_API"),
+            "JUEJIN", Set.of("UNOFFICIAL_API"),
+            "CSDN", BROWSER_PUBLISH_MODES,
+            "ZHIHU", BROWSER_PUBLISH_MODES
+    );
     private static final Set<String> DEFAULT_COVER_EXTENSIONS = Set.of("jpg", "jpeg", "png", "gif", "bmp");
     private static final long DEFAULT_COVER_MAX_SIZE = 2 * 1024 * 1024;
     private static final String AUTH_CONFIG_JSON_ERROR = "认证配置必须是合法 JSON，请检查双引号、逗号和字段格式";
@@ -83,7 +96,7 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
     @Override
     @Transactional
     public PlatformAccountVO createAccount(PlatformAccountSaveRequest request, Long currentUserId) {
-        validateRequest(request);
+        validateRequest(request, true);
         LocalDateTime now = LocalDateTime.now();
         PlatformAccount account = new PlatformAccount();
         fillAccount(account, request, currentUserId, now, true);
@@ -97,7 +110,7 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
     @Override
     @Transactional
     public PlatformAccountVO updateAccount(Long id, PlatformAccountSaveRequest request, Long currentUserId) {
-        validateRequest(request);
+        validateRequest(request, false);
         PlatformAccount account = getRequiredAccount(id);
         fillAccount(account, request, currentUserId, LocalDateTime.now(), false);
         updateById(account);
@@ -176,7 +189,7 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
         return account;
     }
 
-    private void validateRequest(PlatformAccountSaveRequest request) {
+    private void validateRequest(PlatformAccountSaveRequest request, boolean creating) {
         validatePlatform(request.getPlatform());
         if (!AUTH_TYPES.contains(request.getAuthType())) {
             throw new BusinessException("authType is invalid");
@@ -184,8 +197,14 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
         if (!PUBLISH_MODES.contains(request.getDefaultPublishMode())) {
             throw new BusinessException("defaultPublishMode is invalid");
         }
+        if (!PLATFORM_AUTH_TYPES.get(request.getPlatform()).contains(request.getAuthType())) {
+            throw new BusinessException("当前平台不支持该认证方式");
+        }
+        if (!PLATFORM_PUBLISH_MODES.get(request.getPlatform()).contains(request.getDefaultPublishMode())) {
+            throw new BusinessException("当前平台不支持该发布方式");
+        }
         validateEnabled(request.getEnabled());
-        validateAuthConfig(request);
+        validateAuthConfig(request, creating);
     }
 
     private void validatePlatform(String platform) {
@@ -200,8 +219,11 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
         }
     }
 
-    private void validateAuthConfig(PlatformAccountSaveRequest request) {
+    private void validateAuthConfig(PlatformAccountSaveRequest request, boolean creating) {
         if (!StringUtils.hasText(request.getAuthConfig())) {
+            if (creating) {
+                throw new BusinessException("认证配置不能为空");
+            }
             return;
         }
         JsonNode root = parseAuthConfig(request.getAuthConfig());
