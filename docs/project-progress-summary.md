@@ -1,6 +1,6 @@
 # 项目进展汇总
 
-> 更新时间：2026-07-09。本文用于快速了解 AI 内容营销系统当前阶段、已完成能力、平台发布边界和后续建议。
+> 更新时间：2026-07-13。本文用于快速了解 AI 内容营销系统当前阶段、已完成能力、平台发布边界和后续建议。
 
 ## 总体状态
 
@@ -128,3 +128,10 @@ npm run build
 
 - 后端测试通过：26 tests passed。
 - 前端构建通过：Vite 仅提示既有大 chunk 警告。
+
+## 上线后待办
+
+- 域名 `contentpilot-ai.cloud` 和 `www.contentpilot-ai.cloud` 已解析到公网 IP，并可通过 HTTP 访问系统。
+- 后续配置 HTTPS/SSL：为 `contentpilot-ai.cloud` 和 `www.contentpilot-ai.cloud` 申请证书，配置 Nginx 监听 `443`，并将 `80` 自动重定向到 `443`。
+- HTTPS 完成前，浏览器会显示“不安全”；登录密码和 JWT 在公网环境下建议尽快切换到 HTTPS。
+- 如需长期使用国内服务器域名访问，继续完成 ICP 备案并确认腾讯云安全组仅开放必要端口。

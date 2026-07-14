@@ -4,6 +4,8 @@ import com.aicontent.marketing.article.entity.Article;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Data
 public class ArticleDetailVO {
@@ -26,6 +28,8 @@ public class ArticleDetailVO {
 
     private String keywords;
 
+    private Long productConfigId;
+
     private Long createdBy;
 
     private Long updatedBy;
@@ -33,6 +37,8 @@ public class ArticleDetailVO {
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
+
+    private List<ArticleResearchSourceVO> researchSources = new ArrayList<>();
 
     public static ArticleDetailVO from(Article article) {
         ArticleDetailVO vo = new ArticleDetailVO();
@@ -45,6 +51,7 @@ public class ArticleDetailVO {
         vo.setStatus(article.getStatus());
         vo.setTags(article.getTags());
         vo.setKeywords(article.getKeywords());
+        vo.setProductConfigId(article.getProductConfigId());
         vo.setCreatedBy(article.getCreatedBy());
         vo.setUpdatedBy(article.getUpdatedBy());
         vo.setCreatedAt(article.getCreatedAt());

@@ -259,7 +259,7 @@ CREATE DATABASE ai_content_marketing DEFAULT CHARACTER SET utf8mb4 COLLATE utf8m
 backend/src/main/resources/application.yml
 ```
 
-数据库、JWT 和 DeepSeek 配置全部通过环境变量读取：
+数据库、JWT、DeepSeek 和 Exa 配置全部通过环境变量读取：
 
 ```bash
 export DB_HOST=localhost
@@ -272,9 +272,12 @@ export DEEPSEEK_API_KEY=your_deepseek_api_key
 export DEEPSEEK_BASE_URL=https://api.deepseek.com
 export DEEPSEEK_MODEL=deepseek-v4-pro
 export DEEPSEEK_TIMEOUT_SECONDS=60
+export EXA_API_KEY=your_exa_api_key
+export EXA_BASE_URL=https://api.exa.ai
+export EXA_TIMEOUT_SECONDS=15
 ```
 
-请不要将真实数据库密码、JWT 密钥、DeepSeek Key、Cookie、csrfToken 或其他平台认证信息写入 YAML 或提交到仓库。
+请不要将真实数据库密码、JWT 密钥、DeepSeek/Exa Key、Cookie、csrfToken 或其他平台认证信息写入 YAML 或提交到仓库。
 
 ### 3. 启动后端
 

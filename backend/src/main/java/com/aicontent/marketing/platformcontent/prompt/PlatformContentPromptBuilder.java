@@ -24,7 +24,7 @@ public class PlatformContentPromptBuilder {
                 平台适配不是扩写，也不是简单改写。你需要先理解原文核心观点，再根据目标平台进行删减、重组和改写。
                 你不需要保留原文所有段落，可以删除不适合目标平台的背景、铺垫、技术细节、硬广表达和重复内容。
                 你可以调整文章标题、结构、段落顺序和表达方式，但必须保持内容真实，不能编造产品功能。
-                你必须严格规避产品配置中的禁用词/敏感词，并保证输出可被后端程序稳定解析。
+                如关联了产品，必须严格规避产品配置中的禁用词/敏感词，并保证输出可被后端程序稳定解析。
                 输出要求：
                 1. 只返回 JSON，不要返回 Markdown 代码块包裹。
                 2. 不要返回额外解释文字。
@@ -43,7 +43,7 @@ public class PlatformContentPromptBuilder {
     ) {
         PlatformAdaptRule rule = ruleFactory.getRule(platform);
         return """
-                请基于以下产品配置和原始文章，生成适合目标平台发布的内容稿。
+                请基于以下上下文和原始文章，生成适合目标平台发布的内容稿。
                 注意：本任务是平台化内容重组，不是扩写，也不是逐段复制原文。
 
                 【目标平台】
@@ -71,14 +71,7 @@ public class PlatformContentPromptBuilder {
                 %s
 
                 【产品配置】
-                产品名称：%s
-                产品简介：%s
-                官网链接：%s
-                核心功能：%s
-                目标用户：%s
-                产品优势：%s
-                品牌语气：%s
-                禁用词/敏感词：%s
+                %s
 
                 【原始文章】
                 标题：%s
@@ -98,7 +91,7 @@ public class PlatformContentPromptBuilder {
                 3. 重新组织标题、开头、正文段落、小标题和结尾，让文章符合目标平台阅读习惯。
                 4. 能减则减，删除重复背景、过长铺垫、过强硬广、不必要技术细节和复杂长段落。
                 5. 保留事实准确性，不编造产品功能、案例、数据或平台能力。
-                6. 禁止使用产品配置中的禁用词/敏感词。
+                6. 如有关联产品，禁止使用产品配置中的禁用词/敏感词；未关联产品时，不要补充或假设任何产品事实。
                 7. content 使用 Markdown，结构清晰，适合直接进入后续发布流程。
                 8. 返回 JSON 格式如下：
                 {
@@ -118,14 +111,7 @@ public class PlatformContentPromptBuilder {
                 formatRules(rule.toneRules()),
                 formatRules(rule.titleRules()),
                 formatRules(rule.tagRules()),
-                text(productConfig.getProductName()),
-                text(productConfig.getProductIntro()),
-                text(productConfig.getOfficialUrl()),
-                text(productConfig.getCoreFeatures()),
-                text(productConfig.getTargetUsers()),
-                text(productConfig.getAdvantages()),
-                text(productConfig.getBrandTone()),
-                text(productConfig.getBannedWords()),
+                productContext(productConfig),
                 text(article.getTitle()),
                 text(article.getSummary()),
                 text(article.getType()),
@@ -134,6 +120,20 @@ public class PlatformContentPromptBuilder {
                 text(article.getContent()),
                 text(extraRequirement)
         );
+    }
+
+    private String productContext(ProductConfigVO productConfig) {
+        if (productConfig == null) {
+            return "本篇文章未关联产品。根据原始文章适配，不要新增、假设或暗示任何特定品牌、官网、功能、案例或承诺。";
+        }
+        return "产品名称：" + text(productConfig.getProductName())
+                + "\n产品简介：" + text(productConfig.getProductIntro())
+                + "\n官网链接：" + text(productConfig.getOfficialUrl())
+                + "\n核心功能：" + text(productConfig.getCoreFeatures())
+                + "\n目标用户：" + text(productConfig.getTargetUsers())
+                + "\n产品优势：" + text(productConfig.getAdvantages())
+                + "\n品牌语气：" + text(productConfig.getBrandTone())
+                + "\n禁用词/敏感词：" + text(productConfig.getBannedWords());
     }
 
     private String formatRules(List<String> rules) {

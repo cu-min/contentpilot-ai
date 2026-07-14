@@ -2,10 +2,12 @@ import { Button, Col, Form, Input, Modal, Row, Select, Space, Typography, messag
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { createArticle, getArticleDetail, updateArticle } from '../../api/article';
+import { listProductConfigs } from '../../api/productConfig';
 import MarkdownPreview from '../../components/MarkdownPreview';
 import PageContainer from '../../components/PageContainer';
 import SectionCard from '../../components/SectionCard';
-import type { ArticleCreatePayload } from '../../types/article';
+import type { ArticleCreatePayload, ArticleResearchSource } from '../../types/article';
+import type { ProductConfig } from '../../types/product';
 import {
   articleLanguageOptions,
   articleTypeOptions,
@@ -28,6 +30,8 @@ export default function ArticleEditor() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [researchSources, setResearchSources] = useState<ArticleResearchSource[]>([]);
+  const [productConfigs, setProductConfigs] = useState<ProductConfig[]>([]);
   const content = Form.useWatch('content', form);
   const openPlatformGenerate = searchParams.get('openPlatformGenerate') === '1';
 
@@ -39,7 +43,14 @@ export default function ArticleEditor() {
   );
 
   useEffect(() => {
+    listProductConfigs()
+      .then((result) => setProductConfigs(result.data || []))
+      .catch((error) => message.error(error instanceof Error ? error.message : '产品配置加载失败'));
+  }, []);
+
+  useEffect(() => {
     if (!articleId) {
+      setResearchSources([]);
       form.setFieldsValue({
         type: 'PRODUCT_INTRO',
         language: 'ZH',
@@ -52,6 +63,7 @@ export default function ArticleEditor() {
     getArticleDetail(articleId)
       .then((result) => {
         form.setFieldsValue(result.data);
+        setResearchSources(result.data.researchSources || []);
       })
       .catch((error) => {
         message.error(error instanceof Error ? error.message : '文章详情加载失败');
@@ -94,7 +106,7 @@ export default function ArticleEditor() {
           requiredMark="optional"
         >
           <Row gutter={18}>
-            <Col xs={24} lg={14}>
+            <Col xs={24} lg={9}>
               <Form.Item
                 label="标题"
                 name="title"
@@ -127,6 +139,24 @@ export default function ArticleEditor() {
                   options={articleLanguageOptions.map((option) => ({
                     value: option.value,
                     label: getArticleLanguageLabel(option.value),
+                  }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={24} lg={5}>
+              <Form.Item
+                label="关联产品"
+                name="productConfigId"
+                extra="可选。未关联产品的文章会按通用主题生成和适配。"
+              >
+                <Select
+                  allowClear
+                  showSearch
+                  placeholder="请选择产品"
+                  optionFilterProp="label"
+                  options={productConfigs.map((product) => ({
+                    value: product.id,
+                    label: product.productName,
                   }))}
                 />
               </Form.Item>
@@ -182,6 +212,36 @@ export default function ArticleEditor() {
           </Space>
         </Form>
       </SectionCard>
+      {researchSources.length > 0 ? (
+        <SectionCard>
+          <Typography.Text strong>联网资料来源</Typography.Text>
+          <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
+            这些资料在生成文章前用于事实补充，不会自动写入正文。
+          </Typography.Paragraph>
+          <Space direction="vertical" size={14} style={{ width: '100%' }}>
+            {researchSources.map((source) => (
+              <div key={`${source.sortOrder}-${source.url}`}>
+                <Space size={8} wrap>
+                  <Typography.Link href={source.url} target="_blank" rel="noreferrer">
+                    {source.title}
+                  </Typography.Link>
+                  <Typography.Text type="secondary">{source.domain || '-'}</Typography.Text>
+                  {source.publishedAt ? (
+                    <Typography.Text type="secondary">
+                      发布于 {new Date(source.publishedAt).toLocaleDateString()}
+                    </Typography.Text>
+                  ) : null}
+                </Space>
+                {source.excerpt ? (
+                  <Typography.Paragraph type="secondary" style={{ margin: '6px 0 0' }}>
+                    {source.excerpt}
+                  </Typography.Paragraph>
+                ) : null}
+              </div>
+            ))}
+          </Space>
+        </SectionCard>
+      ) : null}
       <Modal
         title="Markdown 预览"
         open={previewOpen}

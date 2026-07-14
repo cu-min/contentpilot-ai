@@ -5,8 +5,10 @@ import com.aicontent.marketing.article.dto.ArticleQueryRequest;
 import com.aicontent.marketing.article.dto.ArticleUpdateRequest;
 import com.aicontent.marketing.article.entity.Article;
 import com.aicontent.marketing.article.mapper.ArticleMapper;
+import com.aicontent.marketing.article.mapper.ArticleResearchSourceMapper;
 import com.aicontent.marketing.article.vo.ArticleDetailVO;
 import com.aicontent.marketing.article.vo.ArticleListVO;
+import com.aicontent.marketing.article.vo.ArticleResearchSourceVO;
 import com.aicontent.marketing.common.exception.BusinessException;
 import com.aicontent.marketing.common.result.ResultCode;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -35,6 +37,12 @@ public class ArticleServiceImpl extends ServiceImpl<ArticleMapper, Article> impl
     );
 
     private static final Set<String> LANGUAGES = Set.of("ZH", "EN");
+
+    private final ArticleResearchSourceMapper sourceMapper;
+
+    public ArticleServiceImpl(ArticleResearchSourceMapper sourceMapper) {
+        this.sourceMapper = sourceMapper;
+    }
 
     private static final Set<String> STATUSES = Set.of(
             "DRAFT",
@@ -80,7 +88,12 @@ public class ArticleServiceImpl extends ServiceImpl<ArticleMapper, Article> impl
 
     @Override
     public ArticleDetailVO getArticleDetail(Long id) {
-        return ArticleDetailVO.from(getRequiredArticle(id));
+        ArticleDetailVO detail = ArticleDetailVO.from(getRequiredArticle(id));
+        detail.setResearchSources(sourceMapper.selectList(new LambdaQueryWrapper<com.aicontent.marketing.article.entity.ArticleResearchSource>()
+                        .eq(com.aicontent.marketing.article.entity.ArticleResearchSource::getArticleId, id)
+                        .orderByAsc(com.aicontent.marketing.article.entity.ArticleResearchSource::getSortOrder))
+                .stream().map(ArticleResearchSourceVO::from).toList());
+        return detail;
     }
 
     @Override
@@ -95,6 +108,7 @@ public class ArticleServiceImpl extends ServiceImpl<ArticleMapper, Article> impl
         article.setStatus(STATUS_DRAFT);
         article.setTags(request.getTags());
         article.setKeywords(request.getKeywords());
+        article.setProductConfigId(request.getProductConfigId());
         article.setCreatedBy(currentUserId);
         article.setUpdatedBy(currentUserId);
         article.setCreatedAt(now);
@@ -113,6 +127,7 @@ public class ArticleServiceImpl extends ServiceImpl<ArticleMapper, Article> impl
         article.setLanguage(request.getLanguage());
         article.setTags(request.getTags());
         article.setKeywords(request.getKeywords());
+        article.setProductConfigId(request.getProductConfigId());
         article.setUpdatedBy(currentUserId);
         article.setUpdatedAt(LocalDateTime.now());
         updateById(article);

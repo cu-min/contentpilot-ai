@@ -65,10 +65,9 @@ public class ArticlePlatformContentServiceImpl extends ServiceImpl<ArticlePlatfo
         }
 
         List<String> platforms = normalizePlatforms(request.getPlatforms());
-        ProductConfigVO productConfig = productConfigService.getCurrentConfig();
-        if (!StringUtils.hasText(productConfig.getProductName())) {
-            throw new BusinessException("请先完成产品配置");
-        }
+        ProductConfigVO productConfig = article.getProductConfigId() == null
+                ? null
+                : productConfigService.getConfig(article.getProductConfigId());
 
         return platforms.stream()
                 .map(platform -> generateOne(productConfig, article, platform, request.getExtraRequirement(), currentUserId))

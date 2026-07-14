@@ -61,6 +61,7 @@ vim .env
 - `DB_PASSWORD`：需与 `MYSQL_PASSWORD` 一致
 - `JWT_SECRET`：使用足够长的随机字符串
 - `DEEPSEEK_API_KEY`
+- `EXA_API_KEY`
 - `VNC_PASSWORD`
 
 不要提交 `.env`。

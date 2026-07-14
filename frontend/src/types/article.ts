@@ -27,6 +27,7 @@ export interface ArticleListItem {
   language: ArticleLanguage;
   status: ArticleStatus;
   tags?: string;
+  productConfigId?: number;
   createdBy?: number;
   createdAt?: string;
   updatedAt?: string;
@@ -36,9 +37,22 @@ export interface ArticleDetail extends ArticleListItem {
   content?: string;
   keywords?: string;
   updatedBy?: number;
+  researchSources?: ArticleResearchSource[];
+}
+
+export interface ArticleResearchSource {
+  sourceType: 'PRODUCT_OFFICIAL' | 'WEB';
+  title: string;
+  url: string;
+  domain?: string;
+  publishedAt?: string;
+  excerpt?: string;
+  sortOrder?: number;
+  retrievedAt?: string;
 }
 
 export interface ArticleCreatePayload {
+  productConfigId?: number;
   title: string;
   summary?: string;
   content?: string;

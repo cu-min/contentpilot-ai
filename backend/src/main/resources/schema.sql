@@ -34,10 +34,41 @@ CREATE TABLE IF NOT EXISTS article (
     status VARCHAR(30) NOT NULL,
     tags VARCHAR(500),
     keywords VARCHAR(500),
+    product_config_id BIGINT,
     created_by BIGINT,
     updated_by BIGINT,
     created_at DATETIME,
-    updated_at DATETIME
+    updated_at DATETIME,
+    KEY idx_article_product_config_id (product_config_id)
+);
+
+CREATE TABLE IF NOT EXISTS ai_generation_task (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    progress_message VARCHAR(255),
+    request_summary TEXT,
+    article_id BIGINT,
+    error_message TEXT,
+    created_at DATETIME,
+    updated_at DATETIME,
+    KEY idx_ai_generation_task_user_id (user_id),
+    KEY idx_ai_generation_task_status (status)
+);
+
+CREATE TABLE IF NOT EXISTS article_research_source (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    article_id BIGINT NOT NULL,
+    source_type VARCHAR(30) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    url VARCHAR(2000) NOT NULL,
+    domain VARCHAR(255),
+    published_at DATETIME,
+    excerpt TEXT,
+    sort_order INT NOT NULL,
+    retrieved_at DATETIME,
+    created_at DATETIME,
+    KEY idx_article_research_source_article_id (article_id)
 );
 
 CREATE TABLE IF NOT EXISTS article_platform_content (

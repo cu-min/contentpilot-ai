@@ -1,7 +1,12 @@
-import { Button, Form, Input, Modal, Space, Table, Typography, message } from 'antd';
+import { Button, Form, Input, Modal, Popconfirm, Space, Table, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useEffect, useState } from 'react';
-import { getProductConfig, saveProductConfig } from '../../api/productConfig';
+import {
+  createProductConfig,
+  deleteProductConfig,
+  listProductConfigs,
+  updateProductConfig,
+} from '../../api/productConfig';
 import PageContainer from '../../components/PageContainer';
 import SectionCard from '../../components/SectionCard';
 import type { ProductConfig } from '../../types/product';
@@ -12,16 +17,17 @@ const { TextArea } = Input;
 
 export default function Product() {
   const [form] = Form.useForm<ProductConfig>();
-  const [product, setProduct] = useState<ProductConfig | null>(null);
+  const [products, setProducts] = useState<ProductConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<ProductConfig | null>(null);
 
-  const loadProduct = async () => {
+  const loadProducts = async () => {
     setLoading(true);
     try {
-      const result = await getProductConfig();
-      setProduct(result.data?.id ? result.data : null);
+      const result = await listProductConfigs();
+      setProducts(result.data || []);
     } catch (error) {
       message.error(error instanceof Error ? error.message : '产品配置加载失败');
     } finally {
@@ -30,11 +36,18 @@ export default function Product() {
   };
 
   useEffect(() => {
-    void loadProduct();
+    void loadProducts();
   }, []);
 
-  const openEditModal = () => {
-    form.setFieldsValue(product || {});
+  const openCreateModal = () => {
+    setEditingProduct(null);
+    form.resetFields();
+    setModalOpen(true);
+  };
+
+  const openEditModal = (product: ProductConfig) => {
+    setEditingProduct(product);
+    form.setFieldsValue(product);
     setModalOpen(true);
   };
 
@@ -42,15 +55,31 @@ export default function Product() {
     const values = await form.validateFields();
     setSaving(true);
     try {
-      await saveProductConfig(values);
-      message.success('产品配置已保存');
+      if (editingProduct?.id) {
+        await updateProductConfig(editingProduct.id, values);
+        message.success('产品配置已更新');
+      } else {
+        await createProductConfig(values);
+        message.success('产品配置已新增');
+      }
       setModalOpen(false);
+      setEditingProduct(null);
       form.resetFields();
-      await loadProduct();
+      await loadProducts();
     } catch (error) {
-      message.error(formatFailure('保存', error));
+      message.error(formatFailure(editingProduct ? '更新' : '新增', error));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    try {
+      await deleteProductConfig(id);
+      message.success('产品配置已删除');
+      await loadProducts();
+    } catch (error) {
+      message.error(formatFailure('删除', error));
     }
   };
 
@@ -94,10 +123,23 @@ export default function Product() {
       title: '操作',
       key: 'actions',
       width: 170,
-      render: () => (
-        <Button type="primary" size="small" onClick={openEditModal}>
-          编辑
-        </Button>
+      render: (_, record) => (
+        <Space size={8} wrap={false}>
+          <Button type="primary" size="small" onClick={() => openEditModal(record)}>
+            编辑
+          </Button>
+          <Popconfirm
+            title="删除产品配置"
+            description="删除后将无法继续选择该产品生成文章。确定删除吗？"
+            okText="删除"
+            cancelText="取消"
+            onConfirm={() => record.id && handleDelete(record.id)}
+          >
+            <Button size="small" danger>
+              删除
+            </Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
@@ -110,48 +152,41 @@ export default function Product() {
       <SectionCard>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-            <Typography.Text strong>当前产品配置</Typography.Text>
-            <Button type="primary" onClick={openEditModal}>
-              {product ? '编辑产品配置' : '配置产品'}
+            <Typography.Text strong>产品列表</Typography.Text>
+            <Button type="primary" onClick={openCreateModal}>
+              新增产品
             </Button>
           </Space>
-        <Table
-          rowKey={(record) => String(record.id)}
-          columns={columns}
-          dataSource={product ? [product] : []}
-          loading={loading}
-          pagination={{ pageSize: 10 }}
-        />
+          <Table
+            rowKey={(record) => String(record.id)}
+            columns={columns}
+            dataSource={products}
+            loading={loading}
+            pagination={{ pageSize: 10 }}
+          />
         </Space>
       </SectionCard>
 
       <Modal
-        title={product ? '编辑产品配置' : '配置产品'}
+        title={editingProduct ? '编辑产品配置' : '新增产品配置'}
         open={modalOpen}
         onOk={() => void handleSubmit()}
         onCancel={() => {
           setModalOpen(false);
+          setEditingProduct(null);
           form.resetFields();
         }}
         confirmLoading={saving}
         destroyOnClose
       >
         <Form form={form} layout="vertical" requiredMark="optional">
-          <Form.Item
-            label="产品名称"
-            name="productName"
-            rules={[{ required: true, message: '请输入产品名称' }]}
-          >
+          <Form.Item label="产品名称" name="productName" rules={[{ required: true, message: '请输入产品名称' }]}>
             <Input placeholder="请输入产品名称" maxLength={100} />
           </Form.Item>
           <Form.Item label="产品简介" name="productIntro">
             <TextArea rows={4} placeholder="简要描述产品定位、核心价值和适用场景" />
           </Form.Item>
-          <Form.Item
-            label="官网链接"
-            name="officialUrl"
-            rules={[{ type: 'url', message: '请输入有效的 URL，例如 https://example.com' }]}
-          >
+          <Form.Item label="官网链接" name="officialUrl" rules={[{ type: 'url', message: '请输入有效的 URL，例如 https://example.com' }]}>
             <Input placeholder="https://example.com" maxLength={255} />
           </Form.Item>
           <Form.Item label="核心功能" name="coreFeatures">

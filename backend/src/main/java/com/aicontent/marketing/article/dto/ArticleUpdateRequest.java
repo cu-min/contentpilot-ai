@@ -8,6 +8,8 @@ import lombok.Data;
 @Data
 public class ArticleUpdateRequest {
 
+    private Long productConfigId;
+
     @NotBlank(message = "title is required")
     @Size(max = 200, message = "title must be less than 200 characters")
     private String title;

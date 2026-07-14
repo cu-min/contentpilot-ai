@@ -22,6 +22,8 @@ public class ArticleListVO {
 
     private String tags;
 
+    private Long productConfigId;
+
     private Long createdBy;
 
     private LocalDateTime createdAt;
@@ -37,6 +39,7 @@ public class ArticleListVO {
         vo.setLanguage(article.getLanguage());
         vo.setStatus(article.getStatus());
         vo.setTags(article.getTags());
+        vo.setProductConfigId(article.getProductConfigId());
         vo.setCreatedBy(article.getCreatedBy());
         vo.setCreatedAt(article.getCreatedAt());
         vo.setUpdatedAt(article.getUpdatedAt());

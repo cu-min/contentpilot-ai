@@ -8,35 +8,19 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("article")
-public class Article {
+@TableName("article_research_source")
+public class ArticleResearchSource {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-
+    private Long articleId;
+    private String sourceType;
     private String title;
-
-    private String summary;
-
-    private String content;
-
-    private String type;
-
-    private String language;
-
-    private String status;
-
-    private String tags;
-
-    private String keywords;
-
-    private Long productConfigId;
-
-    private Long createdBy;
-
-    private Long updatedBy;
-
+    private String url;
+    private String domain;
+    private LocalDateTime publishedAt;
+    private String excerpt;
+    private Integer sortOrder;
+    private LocalDateTime retrievedAt;
     private LocalDateTime createdAt;
-
-    private LocalDateTime updatedAt;
 }
