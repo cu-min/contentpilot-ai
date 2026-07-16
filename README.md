@@ -239,6 +239,16 @@ flowchart LR
 └── README.md
 ```
 
+## 多 Agent 开发
+
+本项目采用轻量的 Team Lead、架构、前端、后端和 QA 协作模型。前后端在独立 Git Worktree 中并行实现，架构 Agent 负责必要契约和集成审查，QA 在集成结果上验证。
+
+- 项目规则：`AGENTS.md`
+- 协作流程：`docs/agent/multi-agent-workflow.md`
+- 文件所有权：`docs/agent/ownership.md`
+- Worktree 使用：`docs/agent/worktrees.md`
+- 任务模板：`docs/agent/task-template.md`
+
 ## 本地运行
 
 ### 1. 准备数据库
