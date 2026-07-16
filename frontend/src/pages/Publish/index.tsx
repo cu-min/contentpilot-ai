@@ -11,6 +11,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
@@ -24,9 +25,9 @@ import { getArticlePlatformContents, getPlatformContentDetail } from '../../api/
 import {
   cancelPublishTask,
   createPublishTask,
-  executePublishTask,
   getPublishTaskDetail,
   getPublishTasks,
+  preparePublishTask,
   submitPublishTask,
   updatePublishTask,
 } from '../../api/publishTask';
@@ -51,10 +52,18 @@ import {
   publishTypeOptions,
 } from '../../types/publishTask';
 import { formatDateTime } from '../../utils/datetime';
-import { formatFailure, getErrorText } from '../../utils/feedback';
+import { formatFailure } from '../../utils/feedback';
+import {
+  getPreparedActionLabel,
+  isHttpUrl,
+  isPreparationReady,
+  preparedFallbackUrls,
+} from '../../utils/publishPreparation';
 
-const CSDN_MANAGE_URL = 'https://mp.csdn.net/mp_blog/manage/article';
-const ZHIHU_MANAGE_URL = 'https://www.zhihu.com/creator';
+const CSDN_MANAGE_URL = preparedFallbackUrls.CSDN as string;
+const ZHIHU_MANAGE_URL = preparedFallbackUrls.ZHIHU as string;
+const NOVNC_URL = import.meta.env.VITE_NOVNC_URL
+  || 'http://127.0.0.1:6080/vnc.html?autoconnect=true';
 
 interface PublishTaskFormValues {
   articleId?: number;
@@ -81,14 +90,13 @@ export default function Publish() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [executingTaskId, setExecutingTaskId] = useState<number | null>(null);
+  const [preparingTaskId, setPreparingTaskId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   const [submittingTask, setSubmittingTask] = useState<PublishTask | null>(null);
   const [editing, setEditing] = useState<PublishTask | null>(null);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
 
-  const selectedArticleId = Form.useWatch('articleId', form);
   const selectedPlatformContentId = Form.useWatch('platformContentId', form);
   const selectedSubmitPublishType = Form.useWatch('publishType', submitForm);
 
@@ -163,21 +171,32 @@ export default function Publish() {
     void loadAccounts();
   }, []);
 
-  useEffect(() => {
-    if (!selectedArticleId) {
-      setPlatformContents([]);
-      return;
+  const handleArticleChange = (articleId?: number) => {
+    form.setFieldsValue({
+      articleId,
+      platformContentId: undefined,
+      accountId: undefined,
+      title: undefined,
+    });
+    setPlatformContents([]);
+    setAccounts([]);
+    if (articleId) {
+      void loadPlatformContents(articleId);
     }
-    void loadPlatformContents(selectedArticleId);
-  }, [selectedArticleId]);
+  };
 
-  useEffect(() => {
-    if (!selectedPlatformContent) {
-      return;
+  const handlePlatformContentChange = (platformContentId?: number) => {
+    const content = platformContents.find((item) => item.id === platformContentId);
+    form.setFieldsValue({
+      platformContentId,
+      accountId: undefined,
+      title: content?.title,
+    });
+    setAccounts([]);
+    if (content) {
+      void loadAccounts(content.platform);
     }
-    form.setFieldValue('title', selectedPlatformContent.title);
-    void loadAccounts(selectedPlatformContent.platform);
-  }, [selectedPlatformContent, form]);
+  };
 
   useEffect(() => {
     const platformContentId = Number(searchParams.get('platformContentId'));
@@ -196,6 +215,8 @@ export default function Publish() {
   const openCreate = async (platformContentId?: number) => {
     setEditing(null);
     form.resetFields();
+    setPlatformContents([]);
+    setAccounts([]);
     setModalOpen(true);
     if (!platformContentId) {
       await loadAccounts();
@@ -219,6 +240,8 @@ export default function Publish() {
   const openCreateForArticle = async (articleId: number) => {
     setEditing(null);
     form.resetFields();
+    setPlatformContents([]);
+    setAccounts([]);
     form.setFieldsValue({
       articleId,
       platformContentId: undefined,
@@ -232,6 +255,8 @@ export default function Publish() {
 
   const openEdit = async (record: PublishTask) => {
     try {
+      setPlatformContents([]);
+      setAccounts([]);
       const result = await getPublishTaskDetail(record.id);
       const task = result.data;
       setEditing(task);
@@ -293,7 +318,7 @@ export default function Publish() {
     const values = await submitForm.validateFields();
     const now = dayjs();
     if (values.publishType === 'SCHEDULED' && (!values.scheduleTime || !values.scheduleTime.isAfter(now))) {
-      submitForm.setFields([{ name: 'scheduleTime', errors: ['请选择未来的发布时间'] }]);
+      submitForm.setFields([{ name: 'scheduleTime', errors: ['请选择未来的计划准备时间'] }]);
       return;
     }
     const payload: PublishTaskSubmitPayload = {
@@ -305,7 +330,7 @@ export default function Publish() {
     setSubmitting(true);
     try {
       await submitPublishTask(submittingTask.id, payload);
-      message.success(values.publishType === 'SCHEDULED' ? '定时发布任务已提交' : '任务提交成功');
+      message.success(values.publishType === 'SCHEDULED' ? '计划准备任务已提交' : '任务已提交，等待准备');
       setSubmitModalOpen(false);
       setSubmittingTask(null);
       submitForm.resetFields();
@@ -327,26 +352,24 @@ export default function Publish() {
     }
   };
 
-  const handleExecute = async (record: PublishTask) => {
-    setExecutingTaskId(record.id);
+  const handlePrepare = async (record: PublishTask) => {
+    setPreparingTaskId(record.id);
     try {
-      const result = await executePublishTask(record.id);
-      if (result.data.status === 'SUCCESS') {
-        if (record.platform === 'WECHAT_OFFICIAL') {
-          message.success('公众号草稿创建成功');
-        } else if (record.platform === 'ZHIHU') {
-          message.success('知乎发布成功');
+      const result = await preparePublishTask(record.id);
+      if (result.data.status === 'WAITING_MANUAL_CONFIRM') {
+        if (record.platform === 'WECHAT_OFFICIAL' || record.platform === 'JUEJIN') {
+          message.success('平台草稿已准备，请检查后在平台页面人工发布');
         } else {
-          message.success('自动发布成功');
+          message.success('浏览器内容已填充，请检查后在平台页面人工点击发布');
         }
       } else {
-        message.error(`自动发布失败：${result.data.errorMessage || getPublishTaskStatusLabel(result.data.status) || '发布失败'}`);
+        message.error(`准备失败：${result.data.errorMessage || getPublishTaskStatusLabel(result.data.status) || '请稍后重试'}`);
       }
       await loadTasks();
     } catch (error) {
-      message.error(`自动发布失败：${getErrorText(error, '发布失败')}`);
+      message.error(formatFailure('准备发布', error));
     } finally {
-      setExecutingTaskId(null);
+      setPreparingTaskId(null);
     }
   };
 
@@ -356,6 +379,7 @@ export default function Publish() {
     if (status === 'DRAFT') return 'default';
     if (status === 'PENDING') return 'processing';
     if (status === 'RUNNING') return 'blue';
+    if (status === 'WAITING_MANUAL_CONFIRM') return 'gold';
     if (status === 'SUCCESS') return 'success';
     if (isFailureStatus(status)) return 'error';
     if (status === 'CANCELLED') return 'warning';
@@ -364,7 +388,8 @@ export default function Publish() {
 
   const articleStatus = (record: PublishTask) => {
     if (record.status === 'DRAFT' || record.status === 'PENDING') return null;
-    if (record.status === 'RUNNING') return { label: '发布中', color: 'blue' };
+    if (record.status === 'RUNNING') return { label: '准备中', color: 'blue' };
+    if (record.status === 'WAITING_MANUAL_CONFIRM') return { label: '等待人工确认', color: 'gold' };
     if (record.articleStatus === 'PUBLISHED') return { label: '已发布', color: 'success' };
     if (record.articleStatus === 'FAILED') return { label: '发布失败', color: 'error' };
     if (record.articleStatus === 'CANCELLED') return { label: '已取消', color: 'default' };
@@ -463,6 +488,30 @@ export default function Publish() {
 
   const disableScheduleDate = (current: Dayjs) => current.isBefore(dayjs(), 'day');
 
+  const isScheduleReady = (record: PublishTask) => (
+    isPreparationReady(record.publishType, record.scheduleTime)
+  );
+
+  const handleOpenPrepared = (record: PublishTask) => {
+    if (record.platform === 'CSDN' || record.platform === 'ZHIHU') {
+      window.open(NOVNC_URL, '_blank', 'noreferrer');
+      return;
+    }
+    if (isHttpUrl(record.draftUrl)) {
+      window.open(record.draftUrl, '_blank', 'noreferrer');
+      return;
+    }
+    if (record.platform === 'WECHAT_OFFICIAL') {
+      const mediaId = record.externalDraftId || record.draftUrl?.replace('wechat-draft:', '');
+      message.info(mediaId ? `微信公众号草稿 media_id：${mediaId}` : '草稿已创建，请登录微信公众号后台查看');
+      return;
+    }
+    const fallbackUrl = preparedFallbackUrls[record.platform];
+    if (fallbackUrl) {
+      window.open(fallbackUrl, '_blank', 'noreferrer');
+    }
+  };
+
   const renderTaskActions = (record: PublishTask) => {
     if (record.status === 'DRAFT') {
       return (
@@ -477,11 +526,33 @@ export default function Publish() {
     }
 
     if (record.status === 'PENDING') {
+      const scheduleReady = isScheduleReady(record);
+      const prepareButton = (
+        <Button
+          size="small"
+          type="primary"
+          disabled={!scheduleReady}
+          loading={preparingTaskId === record.id}
+        >
+          准备发布
+        </Button>
+      );
       return (
         <Space size={8} wrap>
-          <Popconfirm title="确认自动发布该文章？" okText="自动发布" cancelText="取消" onConfirm={() => handleExecute(record)}>
-            <Button size="small" type="primary" loading={executingTaskId === record.id}>自动发布</Button>
-          </Popconfirm>
+          {scheduleReady ? (
+            <Popconfirm
+              title="系统只会准备草稿或填充编辑器，不会点击最终发布按钮。确认开始准备？"
+              okText="开始准备"
+              cancelText="取消"
+              onConfirm={() => handlePrepare(record)}
+            >
+              {prepareButton}
+            </Popconfirm>
+          ) : (
+            <Tooltip title={`计划准备时间为 ${formatDateTime(record.scheduleTime)}，到达后才能开始准备`}>
+              <span>{prepareButton}</span>
+            </Tooltip>
+          )}
           <Popconfirm title="确认取消该发布任务？" okText="取消任务" cancelText="返回" onConfirm={() => handleCancel(record)}>
             <Button size="small">取消</Button>
           </Popconfirm>
@@ -490,9 +561,11 @@ export default function Publish() {
     }
 
     if (record.status === 'RUNNING') {
-      if (record.platform === 'CSDN') return <Button size="small" disabled>CSDN 自动化中</Button>;
-      if (record.platform === 'ZHIHU') return <Button size="small" disabled>知乎自动化中</Button>;
-      return <Button size="small" disabled>发布中</Button>;
+      return <Button size="small" disabled>准备中</Button>;
+    }
+
+    if (record.status === 'WAITING_MANUAL_CONFIRM') {
+      return <Button size="small" type="primary" onClick={() => handleOpenPrepared(record)}>{getPreparedActionLabel(record.platform, record.draftUrl)}</Button>;
     }
 
     if (record.status === 'SUCCESS') {
@@ -536,7 +609,7 @@ export default function Publish() {
       ),
     },
     {
-      title: '发布类型',
+      title: '准备类型',
       dataIndex: 'publishType',
       width: 100,
       responsive: ['md'],
@@ -550,7 +623,7 @@ export default function Publish() {
       render: (mode: string) => <Tag>{getPublishModeLabel(mode)}</Tag>,
     },
     {
-      title: '发布时间',
+      title: '计划时间',
       key: 'publishTime',
       width: 150,
       responsive: ['xl'],
@@ -562,18 +635,44 @@ export default function Publish() {
       width: 180,
       responsive: ['lg'],
       render: (_, record) => {
+        if (record.status === 'WAITING_MANUAL_CONFIRM') {
+          if (record.platform === 'WECHAT_OFFICIAL' || record.platform === 'JUEJIN') {
+            const draftId = record.externalDraftId || (
+              record.platform === 'WECHAT_OFFICIAL'
+                ? record.draftUrl?.replace('wechat-draft:', '')
+                : undefined
+            );
+            return (
+              <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+                <Typography.Text type="warning">平台草稿已准备</Typography.Text>
+                <Typography.Text type="secondary">请检查草稿，并在平台页面人工确认发布。</Typography.Text>
+                {draftId ? (
+                  <Typography.Text type="secondary" copyable={{ text: draftId }}>
+                    草稿 ID：{draftId}
+                  </Typography.Text>
+                ) : null}
+              </Space>
+            );
+          }
+          return (
+            <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
+              <Typography.Text type="warning">编辑器已填充</Typography.Text>
+              <Typography.Text type="secondary">系统已停在最终发布按钮前，请在浏览器检查并人工点击发布。</Typography.Text>
+            </Space>
+          );
+        }
         if (record.status === 'SUCCESS' && isOfficialArticleUrl(record.publishUrl)) {
           if (record.platform === 'ZHIHU') {
             return (
               <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
-                <Typography.Text type="success">知乎发布成功</Typography.Text>
+                <Typography.Text type="success">历史任务已完成</Typography.Text>
               </Space>
             );
           }
           if (record.platform === 'CSDN') {
             return (
               <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
-                <Typography.Text type="success">CSDN 发布成功</Typography.Text>
+                <Typography.Text type="success">历史任务已完成</Typography.Text>
               </Space>
             );
           }
@@ -582,7 +681,7 @@ export default function Publish() {
         if (record.status === 'SUCCESS' && record.platform === 'ZHIHU') {
           return (
             <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
-              <Typography.Text type="success">知乎发布成功</Typography.Text>
+              <Typography.Text type="success">历史任务已完成</Typography.Text>
               {!isZhihuArticleUrl(record.publishUrl) ? (
                 <Typography.Text type="secondary">未自动获取正式文章链接，请在知乎创作中心查看。</Typography.Text>
               ) : null}
@@ -592,7 +691,7 @@ export default function Publish() {
         if (record.status === 'SUCCESS' && record.platform === 'CSDN') {
           return (
             <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
-              <Typography.Text type="success">CSDN 发布成功</Typography.Text>
+              <Typography.Text type="success">历史任务已完成</Typography.Text>
               {!isCsdnArticleUrl(record.publishUrl) ? (
                 <Typography.Text type="secondary">未自动获取正式文章链接，请在 CSDN 内容管理页查看。</Typography.Text>
               ) : null}
@@ -605,7 +704,7 @@ export default function Publish() {
         if (record.status === 'RUNNING' && record.platform === 'CSDN') {
           return (
             <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
-              <Typography.Text type="warning">CSDN 浏览器自动化执行中</Typography.Text>
+              <Typography.Text type="warning">CSDN 编辑器准备中</Typography.Text>
               <Typography.Text type="secondary">请不要操作 Chrome for Testing 窗口。</Typography.Text>
             </Space>
           );
@@ -613,7 +712,7 @@ export default function Publish() {
         if (record.status === 'RUNNING' && record.platform === 'ZHIHU') {
           return (
             <Space direction="vertical" size={2} style={{ whiteSpace: 'normal' }}>
-              <Typography.Text type="warning">知乎浏览器自动化执行中</Typography.Text>
+              <Typography.Text type="warning">知乎编辑器准备中</Typography.Text>
               <Typography.Text type="secondary">请不要操作 Chrome for Testing 窗口。</Typography.Text>
             </Space>
           );
@@ -637,7 +736,7 @@ export default function Publish() {
           }
           return (
             <Typography.Text type="danger" ellipsis={{ tooltip: record.errorMessage }}>
-              {record.errorMessage || getPublishTaskStatusLabel(record.status) || '执行失败'}
+              {record.errorMessage || getPublishTaskStatusLabel(record.status) || '准备失败'}
             </Typography.Text>
           );
         }
@@ -664,7 +763,7 @@ export default function Publish() {
   return (
     <PageContainer
       title="发布任务"
-      description="把准备好的平台稿送出去：创建任务、自动发布、查看结果，每一步都清清楚楚。"
+      description="系统负责创建平台草稿或填充编辑器，并停在最终发布按钮前；请由运营人员检查后在平台页面人工确认发布。"
     >
       <SectionCard>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -688,7 +787,7 @@ export default function Publish() {
             <Form.Item name="publishType">
               <Select
                 allowClear
-                placeholder="发布类型"
+                placeholder="准备类型"
                 style={{ width: 140 }}
                 options={[...publishTypeOptions]}
               />
@@ -706,7 +805,7 @@ export default function Publish() {
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Typography.Text strong>发布任务列表</Typography.Text>
             <Space>
-              <Button type="primary" onClick={() => openCreate()}>创建发布任务</Button>
+              <Button type="primary" onClick={() => openCreate()}>创建准备任务</Button>
             </Space>
           </Space>
           <Table
@@ -716,7 +815,7 @@ export default function Publish() {
             dataSource={tasks}
             locale={{
               emptyText: (
-                <Empty description="暂无发布任务">
+                <Empty description="暂无准备任务">
                   <Button type="primary" onClick={() => navigate('/articles')}>
                     去文章详情创建任务
                   </Button>
@@ -754,9 +853,11 @@ export default function Publish() {
           >
             <Select
               showSearch
+              allowClear
               placeholder="请选择文章"
               optionFilterProp="label"
               options={articles.map((article) => ({ label: article.title, value: article.id }))}
+              onChange={handleArticleChange}
             />
           </Form.Item>
           <Form.Item
@@ -770,6 +871,7 @@ export default function Publish() {
                 label: `${getPlatformContentPlatformLabel(content.platform)} - ${content.title}`,
                 value: content.id,
               }))}
+              onChange={handlePlatformContentChange}
             />
           </Form.Item>
           <Form.Item
@@ -779,9 +881,10 @@ export default function Publish() {
             extra={selectedPlatformContent ? '只显示与当前平台稿同平台的账号。' : '请先选择平台发布稿。'}
           >
             <Select
+              disabled={!selectedPlatformContent}
               placeholder="请选择平台账号"
               options={accounts
-                .filter((account) => !selectedPlatformContent || account.platform === selectedPlatformContent.platform)
+                .filter((account) => account.enabled === 1 && account.platform === selectedPlatformContent?.platform)
                 .map((account) => ({
                   label: `${account.accountName}${account.enabled === 1 ? '' : '（已禁用）'}`,
                   value: account.id,
@@ -795,7 +898,7 @@ export default function Publish() {
       </Modal>
 
       <Modal
-        title="提交发布任务"
+        title="提交准备任务"
         open={submitModalOpen}
         onCancel={() => {
           setSubmitModalOpen(false);
@@ -810,17 +913,17 @@ export default function Publish() {
       >
         <Form form={submitForm} layout="vertical" requiredMark="optional">
           <Form.Item
-            label="发布类型"
+            label="准备类型"
             name="publishType"
-            rules={[{ required: true, message: '请选择发布类型' }]}
+            rules={[{ required: true, message: '请选择准备类型' }]}
           >
             <Radio.Group options={[...publishTypeOptions]} />
           </Form.Item>
           {selectedSubmitPublishType === 'SCHEDULED' ? (
             <Form.Item
-              label="计划发布时间"
+              label="计划准备时间"
               name="scheduleTime"
-              rules={[{ required: true, message: '请选择计划发布时间' }]}
+              rules={[{ required: true, message: '请选择计划准备时间' }]}
             >
               <DatePicker
                 showTime

@@ -12,8 +12,8 @@ const workflowSteps = [
   { title: '文章库', description: '编辑正文并管理文章状态', path: '/articles' },
   { title: '平台稿', description: '为不同平台重组内容', path: '/articles' },
   { title: '平台账号', description: '配置各平台发布账号', path: '/platform' },
-  { title: '发布任务', description: '创建任务并提交待执行', path: '/publish' },
-  { title: '正式发布', description: '同步平台发布结果', path: '/publish' },
+  { title: '发布任务', description: '创建任务并准备平台草稿', path: '/publish' },
+  { title: '人工发布', description: '检查草稿并在平台确认发布', path: '/publish' },
 ];
 
 export default function Dashboard() {
@@ -51,7 +51,7 @@ export default function Dashboard() {
               从选题生成到全平台发布的一体化流程
             </Typography.Title>
             <Typography.Paragraph className="dashboard-copy">
-              运营人员可以从产品资料生成文章，适配微信公众号、掘金、CSDN、知乎等平台，并在发布任务中查看执行结果。
+              运营人员可以从产品资料生成文章，适配微信公众号、掘金、CSDN、知乎等平台，由系统准备草稿后人工检查发布。
             </Typography.Paragraph>
           </div>
           <Space wrap>
@@ -73,12 +73,12 @@ export default function Dashboard() {
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <div className="dashboard-stat">
-              <Statistic title="发布模式" value="自动发布" />
+              <Statistic title="发布模式" value="人工确认" />
             </div>
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <div className="dashboard-stat">
-              <Statistic title="发布链路" value="正式可用" />
+              <Statistic title="发布链路" value="准备到发布前" />
             </div>
           </Col>
         </Row>
@@ -106,7 +106,7 @@ export default function Dashboard() {
         <div className="dashboard-section-head">
           <div>
             <Typography.Title level={5}>主流程</Typography.Title>
-            <Typography.Text type="secondary">按顺序操作即可完成一次从文章生成到平台发布的完整链路。</Typography.Text>
+            <Typography.Text type="secondary">按顺序准备平台内容，最终发布动作由运营人员在平台页面检查并确认。</Typography.Text>
           </div>
         </div>
         <div className="workflow-grid">

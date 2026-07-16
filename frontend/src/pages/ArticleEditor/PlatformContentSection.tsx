@@ -210,7 +210,7 @@ export default function PlatformContentSection({
       render: (_, record) => (
         <Space size={8}>
           <Button size="small" onClick={() => openEdit(record)}>查看编辑</Button>
-          <Button size="small" onClick={() => navigate(`/publish?platformContentId=${record.id}`)}>创建任务</Button>
+          <Button size="small" onClick={() => navigate(`/publish?platformContentId=${record.id}`)}>准备发布</Button>
           {record.status === 'ARCHIVED' ? (
             <Button size="small" onClick={() => handleRestore(record)}>恢复</Button>
           ) : (

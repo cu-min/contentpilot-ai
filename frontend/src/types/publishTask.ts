@@ -6,6 +6,7 @@ export type PublishTaskStatus =
   | 'PENDING'
   | 'CANCELLED'
   | 'RUNNING'
+  | 'WAITING_MANUAL_CONFIRM'
   | 'SUCCESS'
   | 'FAILED';
 
@@ -64,16 +65,17 @@ export interface PublishTaskSubmitPayload {
 }
 
 export const publishTypeOptions = [
-  { label: '立即发布', value: 'IMMEDIATE' },
-  { label: '定时发布', value: 'SCHEDULED' },
+  { label: '立即准备', value: 'IMMEDIATE' },
+  { label: '计划准备', value: 'SCHEDULED' },
 ] as const;
 
 export const publishTaskStatusOptions = [
   { label: '草稿', value: 'DRAFT' },
-  { label: '待发布', value: 'PENDING' },
-  { label: '执行中', value: 'RUNNING' },
-  { label: '执行成功', value: 'SUCCESS' },
-  { label: '执行失败', value: 'FAILED' },
+  { label: '待准备', value: 'PENDING' },
+  { label: '准备中', value: 'RUNNING' },
+  { label: '等待人工确认', value: 'WAITING_MANUAL_CONFIRM' },
+  { label: '历史发布成功', value: 'SUCCESS' },
+  { label: '准备失败', value: 'FAILED' },
   { label: '已取消', value: 'CANCELLED' },
 ] as const;
 

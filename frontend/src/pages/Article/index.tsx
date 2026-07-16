@@ -104,7 +104,7 @@ export default function Article() {
           生成平台稿
         </Button>
         <Button size="small" onClick={() => navigate(`/publish?articleId=${record.id}`)}>
-          发布平台稿
+          准备发布
         </Button>
         <Button size="small" danger onClick={() => handleArchive(record)}>
           归档
