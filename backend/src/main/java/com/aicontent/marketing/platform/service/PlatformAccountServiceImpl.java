@@ -19,6 +19,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -59,17 +60,20 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
     private final WechatAccessTokenCache wechatAccessTokenCache;
     private final WechatClient wechatClient;
     private final PlatformCredentialCipher credentialCipher;
+    private final String allowedProfileRoot;
 
     public PlatformAccountServiceImpl(
             ObjectMapper objectMapper,
             WechatAccessTokenCache wechatAccessTokenCache,
             WechatClient wechatClient,
-            PlatformCredentialCipher credentialCipher
+            PlatformCredentialCipher credentialCipher,
+            @Value("${browser.profile.allowed-root:}") String allowedProfileRoot
     ) {
         this.objectMapper = objectMapper;
         this.wechatAccessTokenCache = wechatAccessTokenCache;
         this.wechatClient = wechatClient;
         this.credentialCipher = credentialCipher;
+        this.allowedProfileRoot = allowedProfileRoot;
     }
 
     @Override
@@ -241,7 +245,14 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
             WechatAuthConfig.parse(request.getAuthConfig(), objectMapper);
         }
         if (BROWSER_PLATFORMS.contains(request.getPlatform()) && BROWSER_PUBLISH_MODES.contains(request.getDefaultPublishMode())) {
-            BrowserPublisherConfig.parse(request.getAuthConfig(), objectMapper, defaultBrowserEditorUrl(request.getPlatform()));
+            BrowserPublisherConfig.parse(
+                    request.getAuthConfig(),
+                    objectMapper,
+                    request.getPlatform(),
+                    defaultBrowserEditorUrl(request.getPlatform()),
+                    defaultBrowserManageUrl(request.getPlatform()),
+                    allowedProfileRoot
+            );
         }
     }
 
@@ -251,6 +262,16 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
         }
         if ("ZHIHU".equals(platform)) {
             return "https://zhuanlan.zhihu.com/write";
+        }
+        return "";
+    }
+
+    private String defaultBrowserManageUrl(String platform) {
+        if ("CSDN".equals(platform)) {
+            return "https://mp.csdn.net/mp_blog/manage/article";
+        }
+        if ("ZHIHU".equals(platform)) {
+            return "https://www.zhihu.com/creator";
         }
         return "";
     }
