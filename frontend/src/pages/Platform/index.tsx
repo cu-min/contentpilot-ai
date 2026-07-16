@@ -96,8 +96,27 @@ export default function Platform() {
     }
   };
 
+  const handlePlatformChange = (platform: PlatformContentPlatform) => {
+    const authType = getPlatformAuthTypeOptions(platform)[0]?.value;
+    const defaultPublishMode = getPlatformPublishModeOptions(platform)[0]?.value;
+    form.setFieldsValue({
+      platform,
+      authType,
+      defaultPublishMode,
+      authConfig: undefined,
+    });
+  };
+
   const handleSave = async () => {
     const values = await form.validateFields();
+    if ((!editing || values.platform !== editing.platform) && !values.authConfig?.trim()) {
+      const errorMessage = editing
+        ? '切换平台后必须重新填写对应平台的认证配置'
+        : '请填写认证配置';
+      form.setFields([{ name: 'authConfig', errors: [errorMessage] }]);
+      message.error(`保存失败：${errorMessage}`);
+      return;
+    }
     if (values.authConfig?.trim()) {
       try {
         JSON.parse(values.authConfig);
@@ -289,7 +308,7 @@ export default function Platform() {
             name="platform"
             rules={[{ required: true, message: '请选择平台' }]}
           >
-            <Select options={[...platformContentOptions]} />
+            <Select options={[...platformContentOptions]} onChange={handlePlatformChange} />
           </Form.Item>
           <Form.Item
             label="账号名称"
@@ -315,7 +334,7 @@ export default function Platform() {
           <Form.Item
             label="认证配置"
             name="authConfig"
-            extra={editing ? '编辑时留空表示保留原认证配置。微信公众号需要 appId、appSecret、defaultThumbMediaId；掘金需要 cookie、defaultCategoryId、defaultTagIds；CSDN/知乎浏览器自动化需要 browserUserDataDir。敏感信息不要提交到代码仓库。' : '建议使用 JSON 字符串保存本地测试配置。CSDN 示例：{"browserUserDataDir":"本机浏览器登录态目录","editorUrl":"https://editor.csdn.net/md/?not_checkout=1","defaultTags":["Java","Spring Boot","AI"],"defaultCategory":"后端","defaultColumn":"","defaultSummary":"","manualConfirm":true}。知乎示例：{"browserUserDataDir":"本机浏览器登录态目录","editorUrl":"https://zhuanlan.zhihu.com/write","manageUrl":"https://www.zhihu.com/creator","defaultTopics":["项目管理","效率工具","知识管理"],"defaultColumn":"","manualConfirm":false,"autoPublish":true,"waitAfterFillMs":1000}'}
+            extra={editing ? '平台不变时留空表示保留原认证配置；切换平台后必须重新填写。微信公众号需要 appId、appSecret、defaultThumbMediaId；掘金需要 cookie、defaultCategoryId、defaultTagIds；CSDN/知乎浏览器自动化需要 browserUserDataDir。敏感信息不要提交到代码仓库。' : '建议使用 JSON 字符串保存本地测试配置。CSDN 示例：{"browserUserDataDir":"本机浏览器登录态目录","editorUrl":"https://editor.csdn.net/md/?not_checkout=1","defaultTags":["Java","Spring Boot","AI"],"defaultCategory":"后端","defaultColumn":"","defaultSummary":"","manualConfirm":true}。知乎示例：{"browserUserDataDir":"本机浏览器登录态目录","editorUrl":"https://zhuanlan.zhihu.com/write","manageUrl":"https://www.zhihu.com/creator","defaultTopics":["项目管理","效率工具","知识管理"],"defaultColumn":"","manualConfirm":true,"autoPublish":false,"waitAfterFillMs":1000}'}
           >
             <TextArea
               rows={5}
