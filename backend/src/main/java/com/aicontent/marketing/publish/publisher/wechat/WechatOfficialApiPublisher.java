@@ -64,22 +64,10 @@ public class WechatOfficialApiPublisher implements PlatformPublisher {
                     )
             )));
             String mediaId = response.mediaId();
-            if (!config.draftOnly()) {
-                WechatFreePublishSubmitResponse submitResponse = wechatClient.submitFreePublish(accessToken, mediaId);
-                return PublishResult.submitted(
-                        "wechat-publish:" + submitResponse.publishId(),
-                        mediaId,
-                        submitResponse.publishId(),
-                        null,
-                        "已提交微信发布，等待平台确认"
-                );
-            }
-            return PublishResult.success(
-                    "wechat-draft:" + mediaId,
+            return PublishResult.prepared(
                     mediaId,
-                    null,
-                    null,
-                    "微信公众号草稿创建成功"
+                    "wechat-draft:" + mediaId,
+                    "微信公众号草稿已创建，请在公众号后台检查后人工发布"
             );
         } catch (BusinessException exception) {
             return PublishResult.failed(exception.getMessage());

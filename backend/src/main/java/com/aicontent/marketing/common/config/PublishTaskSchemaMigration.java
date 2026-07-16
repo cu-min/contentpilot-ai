@@ -22,6 +22,8 @@ public class PublishTaskSchemaMigration {
         addColumnIfMissing("draft_url", "VARCHAR(500)");
         addColumnIfMissing("article_status", "VARCHAR(50)");
         addIndexIfMissing("idx_publish_task_scheduled_due", "publish_type, status, schedule_time");
+        normalizeBrowserPreparationMode();
+        invalidateHistoricalMockResults();
     }
 
     private void addColumnIfMissing(String columnName, String columnDefinition) {
@@ -56,5 +58,32 @@ public class PublishTaskSchemaMigration {
         if (count == null || count == 0) {
             jdbcTemplate.execute("ALTER TABLE publish_task ADD INDEX " + indexName + " (" + columns + ")");
         }
+    }
+
+    private void invalidateHistoricalMockResults() {
+        jdbcTemplate.update("""
+                UPDATE publish_task
+                SET publish_url = NULL,
+                    article_status = NULL,
+                    status = 'FAILED',
+                    error_message = '历史 Mock 结果已失效，请重新准备'
+                WHERE publish_url LIKE 'https://mock.publish/%'
+                """);
+    }
+
+    private void normalizeBrowserPreparationMode() {
+        jdbcTemplate.update("""
+                UPDATE platform_account
+                SET default_publish_mode = 'BROWSER_AUTOMATION'
+                WHERE platform IN ('CSDN', 'ZHIHU')
+                  AND default_publish_mode = 'MANUAL_CONFIRM'
+                """);
+        jdbcTemplate.update("""
+                UPDATE publish_task
+                SET publish_mode = 'BROWSER_AUTOMATION'
+                WHERE platform IN ('CSDN', 'ZHIHU')
+                  AND publish_mode = 'MANUAL_CONFIRM'
+                  AND status IN ('DRAFT', 'PENDING', 'RUNNING')
+                """);
     }
 }

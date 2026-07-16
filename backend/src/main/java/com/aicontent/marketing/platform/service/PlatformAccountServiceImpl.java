@@ -35,9 +35,9 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
 
     private static final Set<String> PLATFORMS = Set.of("WECHAT_OFFICIAL", "ZHIHU", "CSDN", "JUEJIN");
     private static final Set<String> AUTH_TYPES = Set.of("APP_SECRET", "COOKIE", "BROWSER_PROFILE", "API_KEY", "MANUAL");
-    private static final Set<String> PUBLISH_MODES = Set.of("OFFICIAL_API", "UNOFFICIAL_API", "BROWSER_AUTOMATION", "MANUAL_CONFIRM");
+    private static final Set<String> PUBLISH_MODES = Set.of("OFFICIAL_API", "UNOFFICIAL_API", "BROWSER_AUTOMATION");
     private static final Set<String> BROWSER_PLATFORMS = Set.of("CSDN", "ZHIHU");
-    private static final Set<String> BROWSER_PUBLISH_MODES = Set.of("BROWSER_AUTOMATION", "MANUAL_CONFIRM");
+    private static final Set<String> BROWSER_PUBLISH_MODES = Set.of("BROWSER_AUTOMATION");
     private static final Map<String, Set<String>> PLATFORM_AUTH_TYPES = Map.of(
             "WECHAT_OFFICIAL", Set.of("APP_SECRET"),
             "JUEJIN", Set.of("COOKIE"),

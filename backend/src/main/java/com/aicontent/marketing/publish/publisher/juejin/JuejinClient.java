@@ -116,29 +116,6 @@ public class JuejinClient {
         }
     }
 
-    public JuejinPublishResult publishArticle(JuejinAuthConfig config, String draftId) {
-        try {
-            if (!StringUtils.hasText(draftId)) {
-                throw new BusinessException("掘金草稿 ID 不能为空");
-            }
-            String requestBody = objectMapper.writeValueAsString(Map.of(
-                    "draft_id", draftId,
-                    "sync_to_org", config.syncToOrg(),
-                    "column_ids", config.columnIds(),
-                    "theme_ids", config.themeIds(),
-                    "encrypted_word_count", config.encryptedWordCount(),
-                    "origin_word_count", config.originWordCount()
-            ));
-
-            JsonNode root = sendAndRead(config, "/article/publish", requestBody, "掘金正式发布失败");
-            return new JuejinPublishResult(readArticleId(root));
-        } catch (BusinessException exception) {
-            throw exception;
-        } catch (Exception exception) {
-            throw new BusinessException("掘金正式发布失败：" + safeMessage(exception));
-        }
-    }
-
     public JuejinArticleStatusResult queryArticleStatus(JuejinAuthConfig config, String articleId) {
         try {
             if (!StringUtils.hasText(articleId)) {
@@ -344,9 +321,6 @@ public class JuejinClient {
     }
 
     public record JuejinDraftUpdateResult(String draftId) {
-    }
-
-    public record JuejinPublishResult(String articleId) {
     }
 
     public record JuejinArticleStatusResult(String articleId, String articleStatus) {

@@ -16,30 +16,29 @@ class WechatOfficialApiPublisherTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void draftOnlyTrueCreatesDraftSuccess() {
+    void draftOnlyTrueCreatesDraftForManualConfirmation() {
         FakeWechatClient client = new FakeWechatClient();
         WechatOfficialApiPublisher publisher = publisher(client);
 
         PublishResult result = publisher.publish(context(true));
 
-        assertTrue(result.success());
-        assertEquals("wechat-draft:draft-media-id", result.publishUrl());
+        assertTrue(result.prepared());
+        assertEquals("wechat-draft:draft-media-id", result.draftUrl());
         assertEquals("draft-media-id", result.draftId());
         assertEquals(0, client.submitCount);
     }
 
     @Test
-    void draftOnlyFalseSubmitsFreePublishAndReturnsSubmitted() {
+    void draftOnlyFalseStillNeverSubmitsFreePublish() {
         FakeWechatClient client = new FakeWechatClient();
         WechatOfficialApiPublisher publisher = publisher(client);
 
         PublishResult result = publisher.publish(context(false));
 
-        assertTrue(result.submitted());
+        assertTrue(result.prepared());
         assertEquals("draft-media-id", result.draftId());
-        assertEquals("publish-id", result.publishId());
-        assertEquals("wechat-publish:publish-id", result.publishUrl());
-        assertEquals(1, client.submitCount);
+        assertEquals("wechat-draft:draft-media-id", result.draftUrl());
+        assertEquals(0, client.submitCount);
     }
 
     private WechatOfficialApiPublisher publisher(FakeWechatClient client) {
@@ -100,10 +99,5 @@ class WechatOfficialApiPublisherTest {
             return new WechatDraftAddResponse("draft-media-id");
         }
 
-        @Override
-        public WechatFreePublishSubmitResponse submitFreePublish(String accessToken, String mediaId) {
-            submitCount++;
-            return new WechatFreePublishSubmitResponse("publish-id");
-        }
     }
 }

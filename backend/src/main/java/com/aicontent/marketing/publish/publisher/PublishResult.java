@@ -21,7 +21,7 @@ public record PublishResult(
     private static final String STATUS_RUNNING = "RUNNING";
     private static final String STATUS_NEED_LOGIN = "NEED_LOGIN";
     private static final String STATUS_NEED_CAPTCHA = "NEED_CAPTCHA";
-    private static final String STATUS_NEED_MANUAL_CONFIRM = "NEED_MANUAL_CONFIRM";
+    private static final String STATUS_WAITING_MANUAL_CONFIRM = "WAITING_MANUAL_CONFIRM";
     private static final String STATUS_LINK_FETCH_FAILED = "LINK_FETCH_FAILED";
     private static final String STATUS_CONTENT_REJECTED = "CONTENT_REJECTED";
 
@@ -49,6 +49,21 @@ public record PublishResult(
         return new PublishResult(TYPE_SUBMITTED, STATUS_RUNNING, false, publishUrl, draftId, publishId, draftUrl, null, message, null);
     }
 
+    public static PublishResult prepared(String draftId, String draftUrl, String message) {
+        return new PublishResult(
+                STATUS_WAITING_MANUAL_CONFIRM,
+                STATUS_WAITING_MANUAL_CONFIRM,
+                false,
+                null,
+                draftId,
+                null,
+                draftUrl,
+                null,
+                message,
+                null
+        );
+    }
+
     public static PublishResult failed(String errorMessage) {
         return failed(errorMessage, null, null, null);
     }
@@ -66,7 +81,7 @@ public record PublishResult(
     }
 
     public static PublishResult needManualConfirm(String publishUrl, String draftUrl, String message) {
-        return blocked(STATUS_NEED_MANUAL_CONFIRM, publishUrl, draftUrl, message);
+        return prepared(null, firstText(draftUrl, publishUrl), message);
     }
 
     public static PublishResult linkFetchFailed(String publishUrl, String message) {
@@ -87,5 +102,13 @@ public record PublishResult(
 
     public boolean blocked() {
         return !TYPE_SUCCESS.equals(type) && !TYPE_FAILED.equals(type) && !TYPE_SUBMITTED.equals(type);
+    }
+
+    public boolean prepared() {
+        return STATUS_WAITING_MANUAL_CONFIRM.equals(taskStatus);
+    }
+
+    private static String firstText(String primary, String fallback) {
+        return primary != null && !primary.isBlank() ? primary : fallback;
     }
 }

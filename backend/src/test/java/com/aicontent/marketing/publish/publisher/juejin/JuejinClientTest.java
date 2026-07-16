@@ -64,31 +64,6 @@ class JuejinClientTest {
     }
 
     @Test
-    void publishArticleParsesArticleId() {
-        server.createContext("/article/publish", exchange -> respond(exchange, 200, """
-                {"err_no":0,"err_msg":"success","data":{"article_id":"7659027978949525547"}}
-                """));
-
-        JuejinClient.JuejinPublishResult result = client.publishArticle(config, "7659214017063878699");
-
-        assertEquals("7659027978949525547", result.articleId());
-    }
-
-    @Test
-    void publishArticleReportsJuejinErrorMessage() {
-        server.createContext("/article/publish", exchange -> respond(exchange, 200, """
-                {"err_no":1001,"err_msg":"category invalid","data":{}}
-                """));
-
-        BusinessException exception = assertThrows(
-                BusinessException.class,
-                () -> client.publishArticle(config, "7659214017063878699")
-        );
-
-        assertEquals("掘金正式发布失败：category invalid", exception.getMessage());
-    }
-
-    @Test
     void queryArticleStatusTreatsPositiveRtimeAsPublished() {
         server.createContext("/article/detail", exchange -> respond(exchange, 200, """
                 {"err_no":0,"err_msg":"success","data":{"article_info":{"article_id":"7659027978949525547","rtime":"1783323631"}}}

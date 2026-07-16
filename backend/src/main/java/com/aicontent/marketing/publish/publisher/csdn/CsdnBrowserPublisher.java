@@ -33,7 +33,6 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
 
     private static final String PLATFORM = "CSDN";
     private static final String MODE_BROWSER_AUTOMATION = "BROWSER_AUTOMATION";
-    private static final String MODE_MANUAL_CONFIRM = "MANUAL_CONFIRM";
     private static final String DEFAULT_EDITOR_URL = "https://editor.csdn.net/md/?not_checkout=1";
     private static final String DEFAULT_MANAGE_URL = "https://mp.csdn.net/mp_blog/manage/article";
     private static final String MANUAL_CONFIRM_MESSAGE = "已自动填充 CSDN 编辑器，请在浏览器中人工确认并发布";
@@ -177,7 +176,7 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
 
     @Override
     public String mode() {
-        return "*";
+        return MODE_BROWSER_AUTOMATION;
     }
 
     @Override
@@ -247,18 +246,10 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             if (!contentOutcome.success()) {
                 return PublishResult.failed("CSDN Markdown 正文填充失败。请人工检查页面结构");
             }
-            if (config.manualConfirm()) {
-                log.info("CSDN optional fields skipped: reason=manualConfirm, taskId={}", context.taskId());
-                return manualConfirmResult(context, page, config);
-            }
             fillOptionalMetadata(page, context, config);
-            if (config.autoPublish()) {
-                PublishResult result = autoPublish(context, page, config);
-                log.info("CSDN publish task result status = {}", result.taskStatus());
-                return result;
-            }
-            log.info("CSDN auto publish disabled: taskId={}", context.taskId());
-            return manualConfirmResult(context, page, config);
+            PublishResult result = prepareForManualConfirm(context, page, config);
+            log.info("CSDN publish preparation result status = {}", result.taskStatus());
+            return result;
         } catch (BusinessException exception) {
             return PublishResult.failed(exception.getMessage());
         } catch (InterruptedException exception) {
@@ -277,13 +268,13 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         String url = currentOrConfiguredUrl(page, config);
         PublishResult result = PublishResult.needManualConfirm(url, url, MANUAL_CONFIRM_MESSAGE);
         log.info("CSDN manual confirm result returned: taskId={}, url={}", context.taskId(), url);
-        log.info("CSDN publish task result status = NEED_MANUAL_CONFIRM");
+        log.info("CSDN publish task result status = WAITING_MANUAL_CONFIRM");
         return result;
     }
 
-    private PublishResult autoPublish(PublishContext context, Page page, BrowserPublisherConfig config) {
+    private PublishResult prepareForManualConfirm(PublishContext context, Page page, BrowserPublisherConfig config) {
         long startedAt = System.currentTimeMillis();
-        log.info("CSDN publish click started: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
+        log.info("CSDN publish preparation started: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
         EditorPublishState editorState = detectEditorPublishState(page);
         log.info("CSDN publish editor state: taskId={}, editorUrl={}, publishButtonVisible={}, saveDraftButtonVisible={}, avatarVisible={}",
                 context.taskId(), editorState.editorUrl(), editorState.publishButtonVisible(), editorState.saveDraftButtonVisible(), editorState.avatarVisible());
@@ -303,15 +294,14 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
             log.warn("CSDN publish result failed: taskId={}, reason=button-not-found, durationMs={}", context.taskId(), elapsed(startedAt));
             return PublishResult.failed("CSDN 发布失败：未找到发布文章按钮");
         }
-        PublishConfirmOutcome confirmOutcome = handlePublishDialogAndConfirm(page, context, config);
-        if (confirmOutcome.failure() != null) {
-            logPublishResult(context, confirmOutcome.failure());
-            return confirmOutcome.failure();
+        PublishResult validationFailure = preparePublishDialog(page, context, config);
+        if (validationFailure != null) {
+            logPublishResult(context, validationFailure);
+            return validationFailure;
         }
-        log.info("CSDN publish result check started: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
-        PublishResult result = waitForPublishResult(page, context, config, startedAt, confirmOutcome.finalClickedAtMs());
-        logPublishResult(context, result);
-        return result;
+        log.info("CSDN publish settings prepared without final confirmation: taskId={}, durationMs={}",
+                context.taskId(), elapsed(startedAt));
+        return manualConfirmResult(context, page, config);
     }
 
     private boolean clickPublishButton(Page page) {
@@ -334,34 +324,33 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         return clicked;
     }
 
-    private PublishConfirmOutcome handlePublishDialogAndConfirm(Page page, PublishContext context, BrowserPublisherConfig config) {
+    private PublishResult preparePublishDialog(Page page, PublishContext context, BrowserPublisherConfig config) {
         long startedAt = System.currentTimeMillis();
         if (!waitForPublishDialog(page)) {
             log.warn("CSDN publish result failed reason=publish-dialog-not-found durationMs={}", elapsed(startedAt));
-            return PublishConfirmOutcome.failed(PublishResult.failed("CSDN 发布失败：未检测到发布弹窗"));
+            return PublishResult.failed("CSDN 发布准备失败：未检测到发布弹窗");
         }
         log.info("CSDN publish dialog detected: durationMs={}", elapsed(startedAt));
         List<String> tags = resolvePublishTags(context, config);
         boolean tagsFilled = fillPublishTags(page, tags);
         if (!tagsFilled) {
             log.warn("CSDN publish result failed reason=tag-fill-failed durationMs={}", elapsed(startedAt));
-            return PublishConfirmOutcome.failed(PublishResult.failed("CSDN 发布失败：文章标签未填写"));
+            return PublishResult.failed("CSDN 发布准备失败：文章标签未填写");
         }
         String summary = resolvePublishSummary(context, config);
         boolean summaryFilled = fillPublishSummary(page, summary);
         if (!summaryFilled) {
             log.warn("CSDN publish result failed reason=summary-fill-failed durationMs={}", elapsed(startedAt));
-            return PublishConfirmOutcome.failed(PublishResult.failed("CSDN 发布失败：文章摘要未填写"));
+            return PublishResult.failed("CSDN 发布准备失败：文章摘要未填写");
         }
         fillPublishOptionalCategory(page, config);
         boolean originalChecked = checkOriginalStatement(page);
         log.info("CSDN publish dialog required fields handled: summaryFilled={}, originalChecked={}, summaryLength={}, durationMs={}",
                 summaryFilled, originalChecked, summary.length(), elapsed(startedAt));
-        if (!clickFinalPublishButton(page)) {
-            log.warn("CSDN publish result failed reason=final-button-not-found durationMs={}", elapsed(startedAt));
-            return PublishConfirmOutcome.failed(PublishResult.failed("CSDN 发布失败：未找到最终确认发布按钮"));
+        if (!finalPublishButtonVisible(page)) {
+            return PublishResult.failed("CSDN 发布准备失败：未找到最终确认发布按钮");
         }
-        return PublishConfirmOutcome.clicked(System.currentTimeMillis());
+        return null;
     }
 
     private boolean waitForPublishDialog(Page page) {
@@ -1360,11 +1349,9 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         }
     }
 
-    private boolean clickFinalPublishButton(Page page) {
-        long startedAt = System.currentTimeMillis();
-        log.info("CSDN final publish confirm started");
+    private boolean finalPublishButtonVisible(Page page) {
         try {
-            Object clicked = page.evaluate("""
+            Object found = page.evaluate("""
                     () => {
                       const text = value => (value || '').replace(/\\s+/g, ' ').trim();
                       const visible = element => {
@@ -1375,31 +1362,17 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
                       const roots = Array.from(document.querySelectorAll('[role="dialog"], .modal, .ant-modal, [class*="modal"], [class*="dialog"]'));
                       roots.push(document.body);
                       const dialog = roots.find(root => visible(root) && text(root.innerText || root.textContent || '').includes('文章标签'));
-                      if (!dialog) return { found: false, clicked: false };
+                      if (!dialog) return false;
                       const buttons = Array.from(dialog.querySelectorAll('button'))
                         .filter(button => visible(button))
                         .filter(button => text(button.innerText || button.textContent) === '发布文章');
                       const button = buttons[buttons.length - 1];
-                      if (!button) return { found: false, clicked: false };
-                      button.scrollIntoView({ block: 'center', inline: 'center' });
-                      button.click();
-                      return { found: true, clicked: true };
+                      return Boolean(button);
                     }
                     """);
-            @SuppressWarnings("unchecked")
-            java.util.Map<String, Object> result = (java.util.Map<String, Object>) clicked;
-            boolean found = Boolean.TRUE.equals(result.get("found"));
-            boolean clickedButton = Boolean.TRUE.equals(result.get("clicked"));
-            if (found) {
-                log.info("CSDN final publish button found: durationMs={}", elapsed(startedAt));
-            }
-            if (clickedButton) {
-                log.info("CSDN final publish confirm clicked: durationMs={}", elapsed(startedAt));
-                log.info("CSDN final publish clicked: durationMs={}", elapsed(startedAt));
-            }
-            return clickedButton;
+            return Boolean.TRUE.equals(found);
         } catch (RuntimeException exception) {
-            log.warn("CSDN final publish confirm failed: reason={}, durationMs={}", safeMessage(exception), elapsed(startedAt));
+            log.warn("CSDN final publish button detection failed: reason={}", safeMessage(exception));
             return false;
         }
     }
@@ -1531,8 +1504,8 @@ public class CsdnBrowserPublisher implements PlatformPublisher {
         if (!PLATFORM.equals(context.platform())) {
             throw new BusinessException("CsdnBrowserPublisher 只支持 CSDN 平台");
         }
-        if (!MODE_BROWSER_AUTOMATION.equals(context.publishMode()) && !MODE_MANUAL_CONFIRM.equals(context.publishMode())) {
-            throw new BusinessException("CsdnBrowserPublisher 只支持 BROWSER_AUTOMATION 或 MANUAL_CONFIRM 发布方式");
+        if (!MODE_BROWSER_AUTOMATION.equals(context.publishMode())) {
+            throw new BusinessException("CsdnBrowserPublisher 只支持 BROWSER_AUTOMATION 发布准备方式");
         }
         if (!StringUtils.hasText(context.content())) {
             throw new BusinessException("CSDN 平台稿正文不能为空");

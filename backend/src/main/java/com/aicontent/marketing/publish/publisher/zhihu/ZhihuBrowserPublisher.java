@@ -32,7 +32,6 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
 
     private static final String PLATFORM = "ZHIHU";
     private static final String MODE_BROWSER_AUTOMATION = "BROWSER_AUTOMATION";
-    private static final String MODE_MANUAL_CONFIRM = "MANUAL_CONFIRM";
     private static final String DEFAULT_EDITOR_URL = "https://zhuanlan.zhihu.com/write";
     private static final String DEFAULT_MANAGE_URL = "https://www.zhihu.com/creator";
     private static final String MANUAL_CONFIRM_MESSAGE = "已自动填充知乎编辑器，请切换到 Chrome for Testing 窗口检查并手动发布";
@@ -108,7 +107,7 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
 
     @Override
     public String mode() {
-        return "*";
+        return MODE_BROWSER_AUTOMATION;
     }
 
     @Override
@@ -163,24 +162,17 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
             }
             ContentFillOutcome contentOutcome = fillContent(page, context.content(), config);
             if (!contentOutcome.success()) {
-                if (config.manualConfirm() && contentOutcome.weakSuccess()) {
+                if (contentOutcome.weakSuccess()) {
                     log.warn("Zhihu content fill weakly accepted for manual confirm: taskId={}, strategy={}",
                             context.taskId(), contentOutcome.strategy());
-                    handlePostFillPrompts(page);
-                    return manualConfirmResult(context, page, config);
+                } else {
+                    return PublishResult.failed("知乎正文填充失败，未能在页面中校验到正文内容");
                 }
-                return PublishResult.failed("知乎正文填充失败，未能在页面中校验到正文内容");
             }
             handlePostFillPrompts(page);
-            if (config.manualConfirm()) {
-                return manualConfirmResult(context, page, config);
-            }
-            if (config.autoPublish()) {
-                PublishResult result = autoPublish(context, page, config);
-                log.info("Zhihu publish task result status = {}", result.taskStatus());
-                return result;
-            }
-            return manualConfirmResult(context, page, config);
+            PublishResult result = prepareForManualConfirm(context, page, config);
+            log.info("Zhihu publish preparation result status = {}", result.taskStatus());
+            return result;
         } catch (BusinessException exception) {
             return PublishResult.failed(exception.getMessage());
         } catch (InterruptedException exception) {
@@ -702,7 +694,7 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
         }
     }
 
-    private PublishResult autoPublish(PublishContext context, Page page, BrowserPublisherConfig config) {
+    private PublishResult prepareForManualConfirm(PublishContext context, Page page, BrowserPublisherConfig config) {
         long startedAt = System.currentTimeMillis();
         LoginDetection loginDetection = detectZhihuLoginRequired(page);
         if (loginDetection.required()) {
@@ -726,26 +718,16 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
             return PublishResult.failed("知乎发布失败：未检测到发布设置区域");
         }
         handleTopicAndColumn(page, context, config);
-        log.info("Zhihu publish click started: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
-        if (!clickPublishButton(page)) {
-            log.warn("Zhihu publish result failed reason=button-not-found currentUrl={}", safeUrl(page));
-            return PublishResult.failed("知乎发布失败：未找到发布按钮");
+        if (!publishButtonVisible(page)) {
+            return PublishResult.failed("知乎发布准备失败：未找到人工发布按钮");
         }
-        sleep(1_000);
-        if (publishDialogDetected(page)) {
-            log.info("Zhihu publish dialog detected");
-            handleTopicAndColumn(page, context, config);
-            String validationError = visiblePublishValidationError(page);
-            if (StringUtils.hasText(validationError)) {
-                log.warn("Zhihu publish validation error detected: reason={}", validationError);
-                return PublishResult.failed("知乎发布失败：" + validationError);
-            }
-            if (!clickFinalPublishButton(page)) {
-                log.warn("Zhihu publish result failed reason=final-button-not-found currentUrl={}", safeUrl(page));
-                return PublishResult.failed("知乎发布失败：未找到最终确认发布按钮");
-            }
-        }
-        return waitForPublishResult(page, context, config, startedAt);
+        log.info("Zhihu publish settings prepared without clicking publish: taskId={}, durationMs={}",
+                context.taskId(), elapsed(startedAt));
+        return manualConfirmResult(context, page, config);
+    }
+
+    private boolean publishButtonVisible(Page page) {
+        return browserAutomationService.anyVisibleInPageOrFrames(page, PUBLISH_BUTTON_SELECTORS);
     }
 
     private boolean clickPublishButton(Page page) {
@@ -755,25 +737,9 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
             log.info("Zhihu publish button clicked");
             return true;
         }
-        if (clickPublishButtonByJs(page, false)) {
+        if (clickPublishButtonByJs(page)) {
             log.info("Zhihu publish button found");
             log.info("Zhihu publish button clicked");
-            return true;
-        }
-        return false;
-    }
-
-    private boolean clickFinalPublishButton(Page page) {
-        if (clickPublishButtonByJs(page, true)) {
-            log.info("Zhihu final publish confirm clicked");
-            return true;
-        }
-        if (browserAutomationService.clickFirstInPageOrFrames(page, List.of(
-                "button:has-text('确认发布')",
-                "button:has-text('发布文章')",
-                "button:has-text('发布')"
-        ), 2_000)) {
-            log.info("Zhihu final publish confirm clicked");
             return true;
         }
         return false;
@@ -825,10 +791,10 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
         }
     }
 
-    private boolean clickPublishButtonByJs(Page page, boolean preferDialog) {
+    private boolean clickPublishButtonByJs(Page page) {
         try {
             Object clicked = page.evaluate("""
-                    preferDialog => {
+                    () => {
                       const text = value => (value || '').replace(/\\s+/g, ' ').trim();
                       const visible = element => {
                         if (!element || element.closest('script, style, template') || element.getAttribute('aria-hidden') === 'true') return false;
@@ -838,9 +804,7 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
                       };
                       const roots = [];
                       const dialogs = Array.from(document.querySelectorAll('[role="dialog"], .Modal, .modal, [class*="Modal"], [class*="modal"], [class*="Dialog"], [class*="dialog"]')).filter(visible);
-                      if (preferDialog) roots.push(...dialogs);
                       roots.push(document.body);
-                      if (!preferDialog) roots.push(...dialogs);
                       for (const root of roots) {
                         const buttons = Array.from(root.querySelectorAll('button, a'))
                           .filter(visible)
@@ -858,8 +822,34 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
                       }
                       return false;
                     }
-                    """, preferDialog);
+                    """);
             return Boolean.TRUE.equals(clicked);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private boolean finalPublishButtonVisible(Page page) {
+        try {
+            Object found = page.evaluate("""
+                    () => {
+                      const text = value => (value || '').replace(/\s+/g, ' ').trim();
+                      const visible = element => {
+                        if (!element || element.closest('script, style, template') || element.getAttribute('aria-hidden') === 'true') return false;
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
+                      };
+                      const dialogs = Array.from(document.querySelectorAll('[role="dialog"], .Modal, .modal, [class*="Modal"], [class*="modal"], [class*="Dialog"], [class*="dialog"]'))
+                        .filter(visible);
+                      return dialogs.some(root => Array.from(root.querySelectorAll('button, a'))
+                        .filter(visible)
+                        .some(element => ['发布', '发布文章', '确认发布', '继续发布'].includes(
+                          text(element.innerText || element.textContent || element.getAttribute('aria-label') || '')
+                        )));
+                    }
+                    """);
+            return Boolean.TRUE.equals(found);
         } catch (RuntimeException ignored) {
             return false;
         }
@@ -1476,8 +1466,8 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
         if (!PLATFORM.equals(context.platform())) {
             throw new BusinessException("ZhihuBrowserPublisher 只支持 ZHIHU 平台");
         }
-        if (!MODE_BROWSER_AUTOMATION.equals(context.publishMode()) && !MODE_MANUAL_CONFIRM.equals(context.publishMode())) {
-            throw new BusinessException("ZhihuBrowserPublisher 只支持 BROWSER_AUTOMATION 或 MANUAL_CONFIRM 发布方式");
+        if (!MODE_BROWSER_AUTOMATION.equals(context.publishMode())) {
+            throw new BusinessException("ZhihuBrowserPublisher 只支持 BROWSER_AUTOMATION 发布准备方式");
         }
         if (!StringUtils.hasText(context.content())) {
             throw new BusinessException("知乎平台稿正文不能为空");

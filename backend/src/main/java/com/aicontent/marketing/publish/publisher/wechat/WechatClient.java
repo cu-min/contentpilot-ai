@@ -117,33 +117,6 @@ public class WechatClient {
         }
     }
 
-    public WechatFreePublishSubmitResponse submitFreePublish(String accessToken, String mediaId) {
-        try {
-            ObjectNode body = objectMapper.createObjectNode();
-            body.put("media_id", mediaId);
-            String url = baseUrl + "/freepublish/submit?access_token=" + encode(accessToken);
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(TIMEOUT)
-                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                    .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            log.info("Wechat freepublish/submit request completed: status={}, body={}",
-                    response.statusCode(), truncate(response.body()));
-            JsonNode root = readSuccessfulBody(response.statusCode(), response.body(), "提交微信公众号发布失败", true);
-            String publishId = root.path("publish_id").asText();
-            if (!StringUtils.hasText(publishId)) {
-                throw new BusinessException("提交微信公众号发布失败：响应中缺少 publish_id");
-            }
-            return new WechatFreePublishSubmitResponse(publishId);
-        } catch (BusinessException exception) {
-            throw exception;
-        } catch (Exception exception) {
-            throw new BusinessException("提交微信公众号发布失败：" + safeMessage(exception));
-        }
-    }
-
     public WechatPublishStatusResult getFreePublishStatus(String accessToken, String publishId) {
         try {
             ObjectNode body = objectMapper.createObjectNode();
