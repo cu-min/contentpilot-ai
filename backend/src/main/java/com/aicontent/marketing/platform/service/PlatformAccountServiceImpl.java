@@ -2,6 +2,7 @@ package com.aicontent.marketing.platform.service;
 
 import com.aicontent.marketing.common.exception.BusinessException;
 import com.aicontent.marketing.common.result.ResultCode;
+import com.aicontent.marketing.common.security.PlatformCredentialCipher;
 import com.aicontent.marketing.platform.dto.PlatformAccountQueryRequest;
 import com.aicontent.marketing.platform.dto.PlatformAccountSaveRequest;
 import com.aicontent.marketing.platform.entity.PlatformAccount;
@@ -57,15 +58,18 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
     private final ObjectMapper objectMapper;
     private final WechatAccessTokenCache wechatAccessTokenCache;
     private final WechatClient wechatClient;
+    private final PlatformCredentialCipher credentialCipher;
 
     public PlatformAccountServiceImpl(
             ObjectMapper objectMapper,
             WechatAccessTokenCache wechatAccessTokenCache,
-            WechatClient wechatClient
+            WechatClient wechatClient,
+            PlatformCredentialCipher credentialCipher
     ) {
         this.objectMapper = objectMapper;
         this.wechatAccessTokenCache = wechatAccessTokenCache;
         this.wechatClient = wechatClient;
+        this.credentialCipher = credentialCipher;
     }
 
     @Override
@@ -139,11 +143,12 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
         }
         validateDefaultCoverFile(file);
 
-        WechatAuthConfig config = WechatAuthConfig.parseForDefaultCoverUpload(account.getAuthConfig(), objectMapper);
+        String plaintextConfig = credentialCipher.decrypt(account.getAuthConfig());
+        WechatAuthConfig config = WechatAuthConfig.parseForDefaultCoverUpload(plaintextConfig, objectMapper);
         String accessToken = wechatAccessTokenCache.getToken(config.appId(), config.appSecret(), wechatClient);
         WechatMaterialUploadResponse response = wechatClient.uploadPermanentImageMaterial(accessToken, file);
 
-        account.setAuthConfig(updateDefaultThumbMediaId(account.getAuthConfig(), response.mediaId()));
+        account.setAuthConfig(credentialCipher.encrypt(updateDefaultThumbMediaId(plaintextConfig, response.mediaId())));
         account.setUpdatedBy(currentUserId);
         account.setUpdatedAt(LocalDateTime.now());
         updateById(account);
@@ -161,7 +166,9 @@ public class PlatformAccountServiceImpl extends ServiceImpl<PlatformAccountMappe
         account.setAccountName(request.getAccountName());
         account.setAuthType(request.getAuthType());
         if (creating || StringUtils.hasText(request.getAuthConfig())) {
-            account.setAuthConfig(request.getAuthConfig());
+            account.setAuthConfig(credentialCipher.encrypt(request.getAuthConfig()));
+        } else if (StringUtils.hasText(account.getAuthConfig()) && !credentialCipher.isEncrypted(account.getAuthConfig())) {
+            account.setAuthConfig(credentialCipher.encrypt(account.getAuthConfig()));
         }
         account.setDefaultPublishMode(request.getDefaultPublishMode());
         account.setEnabled(request.getEnabled());

@@ -2,6 +2,7 @@ package com.aicontent.marketing.publish.service;
 
 import com.aicontent.marketing.common.exception.BusinessException;
 import com.aicontent.marketing.common.result.ResultCode;
+import com.aicontent.marketing.common.security.PlatformCredentialCipher;
 import com.aicontent.marketing.platform.entity.PlatformAccount;
 import com.aicontent.marketing.platform.mapper.PlatformAccountMapper;
 import com.aicontent.marketing.platformcontent.entity.ArticlePlatformContent;
@@ -57,14 +58,17 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     private final ArticlePlatformContentMapper platformContentMapper;
     private final PlatformAccountMapper platformAccountMapper;
     private final PublisherRegistry publisherRegistry;
+    private final PlatformCredentialCipher credentialCipher;
     public PublishTaskServiceImpl(
             ArticlePlatformContentMapper platformContentMapper,
             PlatformAccountMapper platformAccountMapper,
-            PublisherRegistry publisherRegistry
+            PublisherRegistry publisherRegistry,
+            PlatformCredentialCipher credentialCipher
     ) {
         this.platformContentMapper = platformContentMapper;
         this.platformAccountMapper = platformAccountMapper;
         this.publisherRegistry = publisherRegistry;
+        this.credentialCipher = credentialCipher;
     }
 
     @Override
@@ -359,7 +363,7 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
                 task.getExternalArticleId(),
                 task.getDraftUrl(),
                 StringUtils.hasText(account.getAuthConfig()),
-                account.getAuthConfig(),
+                credentialCipher.decrypt(account.getAuthConfig()),
                 account.getAccountName(),
                 account.getRemark(),
                 task.getScheduleTime()

@@ -9,3 +9,8 @@ spring:
 
 jwt:
   secret: ${JWT_SECRET}
+
+platform:
+  credentials:
+    key: ${PLATFORM_CREDENTIAL_KEY}
+    required: true
