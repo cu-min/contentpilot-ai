@@ -51,7 +51,7 @@ class PublishTaskServiceImplTest {
         task.setScheduleTime(LocalDateTime.now().plusHours(1));
         PublishTaskServiceImpl service = spy(service());
         doReturn(task).when(service).getById(1L);
-        doReturn(true).when(service).updateById(task);
+        doReturn(true).when(service).update(any(LambdaUpdateWrapper.class));
 
         service.submitTask(1L, null, 9L);
 
@@ -65,7 +65,7 @@ class PublishTaskServiceImplTest {
         PublishTask task = draftTask();
         PublishTaskServiceImpl service = spy(service());
         doReturn(task).when(service).getById(1L);
-        doReturn(true).when(service).updateById(task);
+        doReturn(true).when(service).update(any(LambdaUpdateWrapper.class));
 
         PublishTaskSubmitRequest missingTime = new PublishTaskSubmitRequest();
         missingTime.setPublishType("SCHEDULED");
@@ -76,7 +76,7 @@ class PublishTaskServiceImplTest {
         pastTime.setScheduleTime(LocalDateTime.now().minusMinutes(1));
         assertThrows(BusinessException.class, () -> service.submitTask(1L, pastTime, 9L));
 
-        verify(service, never()).updateById(task);
+        verify(service, never()).update(any(LambdaUpdateWrapper.class));
     }
 
     @Test
@@ -84,7 +84,7 @@ class PublishTaskServiceImplTest {
         PublishTask task = draftTask();
         PublishTaskServiceImpl service = spy(service());
         doReturn(task).when(service).getById(1L);
-        doReturn(true).when(service).updateById(task);
+        doReturn(true).when(service).update(any(LambdaUpdateWrapper.class));
         LocalDateTime scheduleTime = LocalDateTime.now().plusMinutes(5);
         PublishTaskSubmitRequest request = new PublishTaskSubmitRequest();
         request.setPublishType("SCHEDULED");
@@ -158,6 +158,64 @@ class PublishTaskServiceImplTest {
         assertNull(result.getPublishUrl());
     }
 
+    @Test
+    void preparationPersistsDraftFieldsAndWaitsForManualConfirmation() {
+        PublishTask task = executableTask();
+        ArticlePlatformContent content = platformContent();
+        PlatformAccount account = enabledAccount();
+        PlatformPublisher publisher = mock(PlatformPublisher.class);
+        when(publisherRegistry.getPublisher("JUEJIN", "UNOFFICIAL_API")).thenReturn(publisher);
+        when(publisher.publish(any())).thenReturn(PublishResult.prepared(
+                "draft-123",
+                "https://juejin.cn/editor/drafts/draft-123",
+                "草稿已准备"
+        ));
+        when(contentMapper.selectById(2L)).thenReturn(content);
+        when(accountMapper.selectById(4L)).thenReturn(account);
+
+        PublishTaskServiceImpl service = spy(service());
+        doReturn(task).when(service).getById(1L);
+        doReturn(true).when(service).update(any(LambdaUpdateWrapper.class));
+        doReturn(true).when(service).updateById(task);
+
+        var result = service.prepareTask(1L, 9L);
+
+        assertEquals("WAITING_MANUAL_CONFIRM", result.getStatus());
+        assertEquals("draft-123", result.getExternalDraftId());
+        assertEquals("https://juejin.cn/editor/drafts/draft-123", result.getDraftUrl());
+        assertNull(result.getPublishUrl());
+        assertNull(result.getArticleStatus());
+        assertNull(result.getErrorMessage());
+    }
+
+    @Test
+    void automaticSuccessResultIsRejectedByPreparationWorkflow() {
+        PublishTask task = executableTask();
+        PlatformPublisher publisher = mock(PlatformPublisher.class);
+        when(publisherRegistry.getPublisher("JUEJIN", "UNOFFICIAL_API")).thenReturn(publisher);
+        when(publisher.publish(any())).thenReturn(PublishResult.success("https://juejin.cn/post/123", "unexpected"));
+        when(contentMapper.selectById(2L)).thenReturn(platformContent());
+        when(accountMapper.selectById(4L)).thenReturn(enabledAccount());
+        PublishTaskServiceImpl service = spy(service());
+        doReturn(task).when(service).getById(1L);
+        doReturn(true).when(service).update(any(LambdaUpdateWrapper.class));
+        doReturn(true).when(service).updateById(task);
+
+        var result = service.prepareTask(1L, 9L);
+
+        assertEquals("FAILED", result.getStatus());
+        assertEquals("发布准备器返回了不受支持的自动发布结果", result.getErrorMessage());
+    }
+
+    @Test
+    void submitFailsWhenAtomicDraftTransitionLosesRace() {
+        PublishTaskServiceImpl service = spy(service());
+        doReturn(draftTask()).when(service).getById(1L);
+        doReturn(false).when(service).update(any(LambdaUpdateWrapper.class));
+
+        assertThrows(BusinessException.class, () -> service.submitTask(1L, null, 9L));
+    }
+
     private PublishTaskServiceImpl service() {
         return new PublishTaskServiceImpl(
                 contentMapper,
@@ -172,6 +230,38 @@ class PublishTaskServiceImplTest {
         task.setStatus("DRAFT");
         task.setCreatedBy(9L);
         return task;
+    }
+
+    private PublishTask executableTask() {
+        PublishTask task = new PublishTask();
+        task.setId(1L);
+        task.setArticleId(3L);
+        task.setStatus("PENDING");
+        task.setPublishType("IMMEDIATE");
+        task.setPlatform("JUEJIN");
+        task.setPublishMode("UNOFFICIAL_API");
+        task.setPlatformContentId(2L);
+        task.setAccountId(4L);
+        task.setTitle("标题");
+        return task;
+    }
+
+    private ArticlePlatformContent platformContent() {
+        ArticlePlatformContent content = new ArticlePlatformContent();
+        content.setId(2L);
+        content.setArticleId(3L);
+        content.setPlatform("JUEJIN");
+        content.setContent("正文");
+        return content;
+    }
+
+    private PlatformAccount enabledAccount() {
+        PlatformAccount account = new PlatformAccount();
+        account.setId(4L);
+        account.setPlatform("JUEJIN");
+        account.setEnabled(1);
+        account.setDefaultPublishMode("UNOFFICIAL_API");
+        return account;
     }
 
 }

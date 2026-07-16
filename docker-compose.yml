@@ -53,6 +53,7 @@ services:
       DISPLAY: :99
       TZ: ${TZ:-Asia/Shanghai}
       VNC_PASSWORD: ${VNC_PASSWORD}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
     volumes:
       - backend-logs:/app/logs
       - playwright-browser-data:/app/browser-data
@@ -62,7 +63,7 @@ services:
       - "8080"
       - "5900"
     ports:
-      - "6080:6080"
+      - "127.0.0.1:${NOVNC_PORT:-6080}:6080"
       # For local backend debugging only. Do not expose 8080 publicly in production.
       # - "8080:8080"
 

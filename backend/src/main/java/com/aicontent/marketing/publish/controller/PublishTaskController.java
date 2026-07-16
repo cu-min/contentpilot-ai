@@ -82,4 +82,12 @@ public class PublishTaskController {
         return Result.success(publishTaskService.executeTask(id, loginUser.getUserId()));
     }
 
+    @PostMapping("/{id}/prepare")
+    public Result<PublishTaskVO> prepare(
+            @PathVariable Long id,
+            @AuthenticationPrincipal LoginUser loginUser
+    ) {
+        return Result.success(publishTaskService.prepareTask(id, loginUser.getUserId()));
+    }
+
 }

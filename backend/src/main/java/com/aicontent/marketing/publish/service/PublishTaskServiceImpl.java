@@ -35,11 +35,10 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     private static final String STATUS_PENDING = "PENDING";
     private static final String STATUS_CANCELLED = "CANCELLED";
     private static final String STATUS_RUNNING = "RUNNING";
-    private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_FAILED = "FAILED";
+    private static final String STATUS_WAITING_MANUAL_CONFIRM = "WAITING_MANUAL_CONFIRM";
     private static final String PUBLISH_TYPE_IMMEDIATE = "IMMEDIATE";
     private static final String PUBLISH_TYPE_SCHEDULED = "SCHEDULED";
-    private static final String ARTICLE_STATUS_PUBLISHED = "PUBLISHED";
     private static final String ARTICLE_STATUS_FAILED = "FAILED";
     private static final String ARTICLE_STATUS_CANCELLED = "CANCELLED";
 
@@ -51,7 +50,8 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
             "CANCELLED",
             "RUNNING",
             "SUCCESS",
-            "FAILED"
+            "FAILED",
+            "WAITING_MANUAL_CONFIRM"
     );
 
     private final ArticlePlatformContentMapper platformContentMapper;
@@ -127,36 +127,50 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
     @Transactional
     public void submitTask(Long id, PublishTaskSubmitRequest request, Long currentUserId) {
         PublishTask task = getRequiredTask(id);
-        if (!STATUS_DRAFT.equals(task.getStatus())) {
-            throw new BusinessException("只有草稿状态的发布任务可以提交");
-        }
         String publishType = normalizePublishType(request == null ? null : request.getPublishType());
         LocalDateTime scheduleTime = request == null ? null : request.getScheduleTime();
-        validateScheduleTime(publishType, scheduleTime, LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        validateScheduleTime(publishType, scheduleTime, now);
+        LambdaUpdateWrapper<PublishTask> wrapper = new LambdaUpdateWrapper<PublishTask>()
+                .eq(PublishTask::getId, id)
+                .eq(PublishTask::getStatus, STATUS_DRAFT)
+                .set(PublishTask::getPublishType, publishType)
+                .set(PublishTask::getScheduleTime, PUBLISH_TYPE_SCHEDULED.equals(publishType) ? scheduleTime : null)
+                .set(PublishTask::getStatus, STATUS_PENDING)
+                .set(PublishTask::getUpdatedBy, currentUserId)
+                .set(PublishTask::getUpdatedAt, now);
+        if (!update(wrapper)) {
+            throw new BusinessException("只有草稿状态的发布任务可以提交");
+        }
         task.setPublishType(publishType);
         task.setScheduleTime(PUBLISH_TYPE_SCHEDULED.equals(publishType) ? scheduleTime : null);
         task.setStatus(STATUS_PENDING);
         task.setUpdatedBy(currentUserId);
-        task.setUpdatedAt(LocalDateTime.now());
-        updateById(task);
+        task.setUpdatedAt(now);
     }
 
     @Override
     @Transactional
     public void cancelTask(Long id, Long currentUserId) {
         PublishTask task = getRequiredTask(id);
-        if (!STATUS_DRAFT.equals(task.getStatus()) && !STATUS_PENDING.equals(task.getStatus())) {
+        LambdaUpdateWrapper<PublishTask> wrapper = new LambdaUpdateWrapper<PublishTask>()
+                .eq(PublishTask::getId, id)
+                .in(PublishTask::getStatus, STATUS_DRAFT, STATUS_PENDING)
+                .set(PublishTask::getStatus, STATUS_CANCELLED)
+                .set(PublishTask::getArticleStatus, ARTICLE_STATUS_CANCELLED)
+                .set(PublishTask::getUpdatedBy, currentUserId)
+                .set(PublishTask::getUpdatedAt, LocalDateTime.now());
+        if (!update(wrapper)) {
             throw new BusinessException("只有草稿或待执行状态的发布任务可以取消");
         }
         task.setStatus(STATUS_CANCELLED);
         task.setArticleStatus(ARTICLE_STATUS_CANCELLED);
         task.setUpdatedBy(currentUserId);
         task.setUpdatedAt(LocalDateTime.now());
-        updateById(task);
     }
 
     @Override
-    public PublishTaskVO executeTask(Long id, Long currentUserId) {
+    public PublishTaskVO prepareTask(Long id, Long currentUserId) {
         PublishTask task = getRequiredTask(id);
         if (!STATUS_PENDING.equals(task.getStatus())) {
             throw new BusinessException("只有待执行状态的发布任务可以执行");
@@ -169,7 +183,12 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         if (!claimPendingTask(id, currentUserId)) {
             throw new BusinessException("发布任务已被其他执行器接管");
         }
-        return executeClaimedTask(getRequiredTask(id), currentUserId);
+        return prepareClaimedTask(getRequiredTask(id), currentUserId);
+    }
+
+    @Override
+    public PublishTaskVO executeTask(Long id, Long currentUserId) {
+        return prepareTask(id, currentUserId);
     }
 
     private boolean claimPendingTask(Long id, Long currentUserId) {
@@ -187,17 +206,18 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         return update(wrapper);
     }
 
-    private PublishTaskVO executeClaimedTask(PublishTask task, Long currentUserId) {
+    private PublishTaskVO prepareClaimedTask(PublishTask task, Long currentUserId) {
         try {
             ArticlePlatformContent platformContent = getRequiredPlatformContent(task.getPlatformContentId());
             PlatformAccount account = getRequiredAccount(task.getAccountId());
             validateTaskResources(task, platformContent, account);
             PlatformPublisher publisher = publisherRegistry.getPublisher(task.getPlatform(), task.getPublishMode());
             PublishResult result = publisher.publish(toPublishContext(task, platformContent, account));
-            if (result.success() && StringUtils.hasText(result.publishUrl())) {
-                task.setStatus(STATUS_SUCCESS);
-                task.setPublishUrl(result.publishUrl());
-                task.setArticleStatus(ARTICLE_STATUS_PUBLISHED);
+            applyResultFields(task, result);
+            if (result.prepared()) {
+                task.setStatus(STATUS_WAITING_MANUAL_CONFIRM);
+                task.setPublishUrl(null);
+                task.setArticleStatus(null);
                 task.setErrorMessage(null);
             } else {
                 task.setStatus(STATUS_FAILED);
@@ -217,7 +237,18 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         return toVO(task);
     }
 
+    private void applyResultFields(PublishTask task, PublishResult result) {
+        task.setPublishUrl(result.publishUrl());
+        task.setExternalDraftId(result.draftId());
+        task.setExternalPublishId(result.publishId());
+        task.setDraftUrl(result.draftUrl());
+        task.setExternalArticleId(result.articleId());
+    }
+
     private String resolveFailureMessage(PublishResult result) {
+        if (result.success() || result.submitted()) {
+            return "发布准备器返回了不受支持的自动发布结果";
+        }
         if (StringUtils.hasText(result.errorMessage())) {
             return result.errorMessage();
         }
