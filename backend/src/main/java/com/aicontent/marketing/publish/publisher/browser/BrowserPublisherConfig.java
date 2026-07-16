@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.util.StringUtils;
 
+import java.net.URI;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,19 +18,20 @@ public record BrowserPublisherConfig(
         String defaultCategory,
         String defaultColumn,
         String defaultSummary,
-        boolean manualConfirm,
-        boolean autoPublish,
         String manageUrl,
         boolean headless,
         double timeoutMs,
         double waitAfterFillMs
 ) {
 
-    public static BrowserPublisherConfig parse(String rawConfig, ObjectMapper objectMapper, String defaultEditorUrl) {
-        return parse(rawConfig, objectMapper, defaultEditorUrl, "");
-    }
-
-    public static BrowserPublisherConfig parse(String rawConfig, ObjectMapper objectMapper, String defaultEditorUrl, String defaultManageUrl) {
+    public static BrowserPublisherConfig parse(
+            String rawConfig,
+            ObjectMapper objectMapper,
+            String platform,
+            String defaultEditorUrl,
+            String defaultManageUrl,
+            String allowedProfileRoot
+    ) {
         if (!StringUtils.hasText(rawConfig)) {
             throw new BusinessException("浏览器自动化 auth_config 未配置");
         }
@@ -42,14 +45,12 @@ public record BrowserPublisherConfig(
                     text(root, "defaultCategory", ""),
                     text(root, "defaultColumn", ""),
                     text(root, "defaultSummary", ""),
-                    bool(root, "manualConfirm", true),
-                    bool(root, "autoPublish", false),
                     text(root, "manageUrl", defaultManageUrl),
                     bool(root, "headless", false),
                     number(root, "timeoutMs", 30_000),
                     number(root, "waitAfterFillMs", 1_000)
             );
-            config.validate();
+            config.validate(platform, allowedProfileRoot);
             return config;
         } catch (BusinessException exception) {
             throw exception;
@@ -58,12 +59,55 @@ public record BrowserPublisherConfig(
         }
     }
 
-    private void validate() {
+    private void validate(String platform, String allowedProfileRoot) {
         if (!StringUtils.hasText(browserUserDataDir)) {
             throw new BusinessException("browserUserDataDir 未配置，请在平台账号 auth_config 中填写浏览器用户目录");
         }
         if (!StringUtils.hasText(editorUrl)) {
             throw new BusinessException("editorUrl 未配置，请在平台账号 auth_config 中填写编辑器地址");
+        }
+        validatePlatformUrl(editorUrl, platform, "editorUrl");
+        if (StringUtils.hasText(manageUrl)) {
+            validatePlatformUrl(manageUrl, platform, "manageUrl");
+        }
+        validateProfileRoot(allowedProfileRoot);
+    }
+
+    private void validatePlatformUrl(String rawUrl, String platform, String fieldName) {
+        try {
+            URI uri = URI.create(rawUrl);
+            String host = uri.getHost();
+            String allowedDomain = switch (platform) {
+                case "CSDN" -> "csdn.net";
+                case "ZHIHU" -> "zhihu.com";
+                default -> throw new BusinessException("不支持的浏览器发布平台");
+            };
+            if (!"https".equalsIgnoreCase(uri.getScheme())
+                    || !StringUtils.hasText(host)
+                    || !(host.equalsIgnoreCase(allowedDomain) || host.toLowerCase().endsWith("." + allowedDomain))) {
+                throw new BusinessException(fieldName + " 必须使用对应平台的 HTTPS 域名");
+            }
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException(fieldName + " 格式无效");
+        }
+    }
+
+    private void validateProfileRoot(String allowedProfileRoot) {
+        if (!StringUtils.hasText(allowedProfileRoot)) {
+            return;
+        }
+        try {
+            Path configured = Path.of(browserUserDataDir).toAbsolutePath().normalize();
+            Path allowed = Path.of(allowedProfileRoot).toAbsolutePath().normalize();
+            if (!configured.startsWith(allowed)) {
+                throw new BusinessException("browserUserDataDir 必须位于允许的浏览器用户目录下");
+            }
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException("browserUserDataDir 格式无效");
         }
     }
 

@@ -26,8 +26,9 @@ class ManualHandoffSafetyTest {
         assertTrue(juejin.contains("PublishResult.prepared("));
         assertTrue(csdn.contains("finalPublishButtonVisible("));
         assertTrue(zhihu.contains("publishButtonVisible("));
-        String zhihuPreparationPath = zhihu.substring(0, zhihu.indexOf("private boolean clickPublishButton"));
-        assertFalse(zhihuPreparationPath.contains("clickPublishButton(page)"));
+        assertFalse(zhihu.contains("clickPublishButton("));
+        assertFalse(zhihu.contains("PublishResult.success("));
+        assertFalse(csdn.contains("PublishResult.success("));
     }
 
     private String source(String relativePath) throws IOException {

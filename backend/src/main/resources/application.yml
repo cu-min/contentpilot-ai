@@ -35,3 +35,7 @@ platform:
   credentials:
     key: ${PLATFORM_CREDENTIAL_KEY:}
     required: false
+
+browser:
+  profile:
+    allowed-root: ${BROWSER_PROFILE_ALLOWED_ROOT:}

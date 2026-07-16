@@ -1,6 +1,7 @@
 package com.aicontent.marketing.platform.service;
 
 import com.aicontent.marketing.common.security.PlatformCredentialCipher;
+import com.aicontent.marketing.common.exception.BusinessException;
 import com.aicontent.marketing.platform.dto.PlatformAccountSaveRequest;
 import com.aicontent.marketing.platform.entity.PlatformAccount;
 import com.aicontent.marketing.publish.publisher.wechat.WechatAccessTokenCache;
@@ -13,6 +14,7 @@ import java.util.Base64;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -58,12 +60,36 @@ class PlatformAccountServiceImplTest {
         assertEquals(AUTH_CONFIG, cipher.decrypt(existing.getAuthConfig()));
     }
 
+    @Test
+    void accountSaveRejectsUntrustedBrowserEditorHost() {
+        PlatformAccountServiceImpl service = service(new PlatformCredentialCipher(KEY), "/app/browser-data");
+        PlatformAccountSaveRequest request = new PlatformAccountSaveRequest();
+        request.setPlatform("CSDN");
+        request.setAccountName("unsafe account");
+        request.setAuthType("BROWSER_PROFILE");
+        request.setDefaultPublishMode("BROWSER_AUTOMATION");
+        request.setEnabled(0);
+        request.setAuthConfig("""
+                {
+                  "browserUserDataDir":"/app/browser-data/csdn",
+                  "editorUrl":"https://evil.example/editor"
+                }
+                """);
+
+        assertThrows(BusinessException.class, () -> service.createAccount(request, 9L));
+    }
+
     private PlatformAccountServiceImpl service(PlatformCredentialCipher cipher) {
+        return service(cipher, "");
+    }
+
+    private PlatformAccountServiceImpl service(PlatformCredentialCipher cipher, String allowedProfileRoot) {
         return new PlatformAccountServiceImpl(
                 new ObjectMapper(),
                 new WechatAccessTokenCache(),
                 mock(WechatClient.class),
-                cipher
+                cipher,
+                allowedProfileRoot
         );
     }
 

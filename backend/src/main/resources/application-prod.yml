@@ -14,3 +14,7 @@ platform:
   credentials:
     key: ${PLATFORM_CREDENTIAL_KEY}
     required: true
+
+browser:
+  profile:
+    allowed-root: /app/browser-data

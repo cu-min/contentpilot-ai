@@ -11,9 +11,9 @@ import com.aicontent.marketing.publish.publisher.browser.BrowserPublisherConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
-import com.microsoft.playwright.options.WaitUntilState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -43,7 +43,6 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
     private static final double CONTENT_STRATEGY_TIMEOUT_MS = 3_000;
     private static final long CONTENT_STRATEGY_BUDGET_MS = 4_000;
     private static final long PUBLISH_SETTINGS_TIMEOUT_MS = 8_000;
-    private static final long PUBLISH_RESULT_TIMEOUT_MS = 45_000;
     private static final int CONTENT_VERIFY_SNAPSHOT_LENGTH = 12_000;
     private static final Pattern VERIFY_TEXT_FRAGMENT_PATTERN = Pattern.compile("[\\p{IsHan}A-Za-z0-9]{6,}");
     private static final List<String> TITLE_INPUT_SELECTORS = List.of(
@@ -93,11 +92,17 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
 
     private final BrowserAutomationService browserAutomationService;
     private final ObjectMapper objectMapper;
+    private final String allowedProfileRoot;
     private final ReentrantLock automationLock = new ReentrantLock();
 
-    public ZhihuBrowserPublisher(BrowserAutomationService browserAutomationService, ObjectMapper objectMapper) {
+    public ZhihuBrowserPublisher(
+            BrowserAutomationService browserAutomationService,
+            ObjectMapper objectMapper,
+            @Value("${browser.profile.allowed-root:}") String allowedProfileRoot
+    ) {
         this.browserAutomationService = browserAutomationService;
         this.objectMapper = objectMapper;
+        this.allowedProfileRoot = allowedProfileRoot;
     }
 
     @Override
@@ -123,8 +128,10 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
             BrowserPublisherConfig config = BrowserPublisherConfig.parse(
                     context.accountAuthConfig(),
                     objectMapper,
+                    PLATFORM,
                     DEFAULT_EDITOR_URL,
-                    DEFAULT_MANAGE_URL
+                    DEFAULT_MANAGE_URL,
+                    allowedProfileRoot
             );
             log.info("Zhihu editor open started: taskId={}, editorUrl={}", context.taskId(), config.editorUrl());
             BrowserAutomationSession session = browserAutomationService.openSession(new BrowserAutomationRequest(
@@ -615,7 +622,7 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
         }
     }
 
-    private PublishResult manualConfirmResult(PublishContext context, Page page, BrowserPublisherConfig config) {
+    private PublishResult waitingManualConfirmResult(PublishContext context, Page page, BrowserPublisherConfig config) {
         String url = currentOrConfiguredUrl(page, config);
         log.info("Zhihu manual confirm result returned: taskId={}, url={}", context.taskId(), url);
         return PublishResult.needManualConfirm(url, url, MANUAL_CONFIRM_MESSAGE);
@@ -723,136 +730,11 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
         }
         log.info("Zhihu publish settings prepared without clicking publish: taskId={}, durationMs={}",
                 context.taskId(), elapsed(startedAt));
-        return manualConfirmResult(context, page, config);
+        return waitingManualConfirmResult(context, page, config);
     }
 
     private boolean publishButtonVisible(Page page) {
         return browserAutomationService.anyVisibleInPageOrFrames(page, PUBLISH_BUTTON_SELECTORS);
-    }
-
-    private boolean clickPublishButton(Page page) {
-        scrollToBottom(page);
-        if (clickBottomPublishButtonByJs(page)) {
-            log.info("Zhihu publish button found");
-            log.info("Zhihu publish button clicked");
-            return true;
-        }
-        if (clickPublishButtonByJs(page)) {
-            log.info("Zhihu publish button found");
-            log.info("Zhihu publish button clicked");
-            return true;
-        }
-        return false;
-    }
-
-    private boolean clickBottomPublishButtonByJs(Page page) {
-        try {
-            Object clicked = page.evaluate("""
-                    () => {
-                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
-                      const visible = element => {
-                        if (!element || element.closest('script, style, template') || element.getAttribute('aria-hidden') === 'true') return false;
-                        const rect = element.getBoundingClientRect();
-                        const style = window.getComputedStyle(element);
-                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
-                      };
-                      const settings = findPublishSettingsRoot();
-                      const settingsRect = settings?.getBoundingClientRect?.();
-                      const buttons = Array.from(document.querySelectorAll('button, a'))
-                        .filter(visible)
-                        .map(element => ({ element, label: text(element.innerText || element.textContent || element.getAttribute('aria-label') || '') }))
-                        .filter(item => item.label === '发布')
-                        .filter(item => !/预览|草稿|取消|关闭/.test(item.label));
-                      const candidates = buttons.filter(item => {
-                        const rect = item.element.getBoundingClientRect();
-                        return settings
-                          ? (settings.contains(item.element) || rect.top >= settingsRect.top - 80)
-                          : rect.top > window.innerHeight * 0.45;
-                      });
-                      const button = (candidates[candidates.length - 1] || buttons[buttons.length - 1] || {}).element;
-                      if (!button) return false;
-                      button.scrollIntoView({ block: 'center', inline: 'center' });
-                      button.click();
-                      return true;
-
-                      function findPublishSettingsRoot() {
-                        const candidates = Array.from(document.querySelectorAll('section, form, div, main, article'))
-                          .filter(visible)
-                          .map(element => ({ element, snapshot: text(element.innerText || element.textContent || '') }))
-                          .filter(item => item.snapshot.includes('发布设置'))
-                          .sort((a, b) => a.snapshot.length - b.snapshot.length);
-                        return (candidates[0] || {}).element || null;
-                      }
-                    }
-                    """);
-            return Boolean.TRUE.equals(clicked);
-        } catch (RuntimeException ignored) {
-            return false;
-        }
-    }
-
-    private boolean clickPublishButtonByJs(Page page) {
-        try {
-            Object clicked = page.evaluate("""
-                    () => {
-                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
-                      const visible = element => {
-                        if (!element || element.closest('script, style, template') || element.getAttribute('aria-hidden') === 'true') return false;
-                        const rect = element.getBoundingClientRect();
-                        const style = window.getComputedStyle(element);
-                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
-                      };
-                      const roots = [];
-                      const dialogs = Array.from(document.querySelectorAll('[role="dialog"], .Modal, .modal, [class*="Modal"], [class*="modal"], [class*="Dialog"], [class*="dialog"]')).filter(visible);
-                      roots.push(document.body);
-                      for (const root of roots) {
-                        const buttons = Array.from(root.querySelectorAll('button, a'))
-                          .filter(visible)
-                          .filter(element => {
-                            const label = text(element.innerText || element.textContent || element.getAttribute('aria-label') || '');
-                            if (!['发布', '发布文章', '确认发布', '继续发布'].includes(label)) return false;
-                            return !/草稿|预览|取消|关闭/.test(label);
-                          });
-                        const button = buttons[buttons.length - 1];
-                        if (button) {
-                          button.scrollIntoView({ block: 'center', inline: 'center' });
-                          button.click();
-                          return true;
-                        }
-                      }
-                      return false;
-                    }
-                    """);
-            return Boolean.TRUE.equals(clicked);
-        } catch (RuntimeException ignored) {
-            return false;
-        }
-    }
-
-    private boolean finalPublishButtonVisible(Page page) {
-        try {
-            Object found = page.evaluate("""
-                    () => {
-                      const text = value => (value || '').replace(/\s+/g, ' ').trim();
-                      const visible = element => {
-                        if (!element || element.closest('script, style, template') || element.getAttribute('aria-hidden') === 'true') return false;
-                        const rect = element.getBoundingClientRect();
-                        const style = window.getComputedStyle(element);
-                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
-                      };
-                      const dialogs = Array.from(document.querySelectorAll('[role="dialog"], .Modal, .modal, [class*="Modal"], [class*="modal"], [class*="Dialog"], [class*="dialog"]'))
-                        .filter(visible);
-                      return dialogs.some(root => Array.from(root.querySelectorAll('button, a'))
-                        .filter(visible)
-                        .some(element => ['发布', '发布文章', '确认发布', '继续发布'].includes(
-                          text(element.innerText || element.textContent || element.getAttribute('aria-label') || '')
-                        )));
-                    }
-                    """);
-            return Boolean.TRUE.equals(found);
-        } catch (RuntimeException ignored) {
-            return false;
-        }
     }
 
     private boolean waitForPublishSettings(Page page) {
@@ -1034,161 +916,9 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
         }
     }
 
-    private PublishResult waitForPublishResult(Page page, PublishContext context, BrowserPublisherConfig config, long startedAt) {
-        log.info("Zhihu publish result check started: taskId={}, currentUrl={}", context.taskId(), safeUrl(page));
-        long deadline = System.currentTimeMillis() + PUBLISH_RESULT_TIMEOUT_MS;
-        boolean triedManagePage = false;
-        while (System.currentTimeMillis() < deadline) {
-            handlePostFillPrompts(page);
-            LoginDetection loginDetection = detectZhihuLoginRequired(page);
-            if (loginDetection.required()) {
-                return needLoginResult(page, config, loginDetection.reason(), "知乎登录状态失效，请在打开的浏览器中完成登录后重新执行发布任务");
-            }
-            CaptchaDetection captchaDetection = detectZhihuCaptchaRequired(page);
-            if (captchaDetection.required()) {
-                return needCaptchaResult(page, config, captchaDetection.reason());
-            }
-            if (publishDialogDetected(page)) {
-                String validationError = visiblePublishValidationError(page);
-                if (StringUtils.hasText(validationError)) {
-                    log.warn("Zhihu publish validation error detected: reason={}", validationError);
-                    return PublishResult.failed("知乎发布失败：" + validationError);
-                }
-                if (elapsed(startedAt) > 8_000) {
-                    log.warn("Zhihu publish result failed reason=dialog-still-visible durationMs={}", elapsed(startedAt));
-                    return PublishResult.failed("知乎发布未完成，发布弹窗仍存在");
-                }
-                sleep(500);
-                continue;
-            }
-            String currentUrl = safeUrl(page);
-            String articleUrl = extractArticleUrl(page, context.title());
-            if (isZhihuArticleUrl(currentUrl)) {
-                log.info("Zhihu publish result success by url: taskId={}, publishUrl={}", context.taskId(), currentUrl);
-                return PublishResult.success(currentUrl, "知乎发布成功");
-            }
-            if (isZhihuArticleUrl(articleUrl)) {
-                log.info("Zhihu publish result success by url: taskId={}, publishUrl={}", context.taskId(), articleUrl);
-                return PublishResult.success(articleUrl, "知乎发布成功");
-            }
-            String snapshot = pageSnapshot(page);
-            if (looksContentRejected(snapshot)) {
-                log.warn("Zhihu publish result failed reason=content-rejected currentUrl={}", currentUrl);
-                return PublishResult.contentRejected(currentUrl, "知乎内容审核失败或触发平台规则，请在知乎创作中心查看详情");
-            }
-            if (visiblePublishSuccessText(page)) {
-                String publishUrl = isZhihuArticleUrl(articleUrl) ? articleUrl : fallbackManageUrl(config);
-                String message = isZhihuArticleUrl(publishUrl)
-                        ? "知乎发布成功"
-                        : "知乎发布成功，但未自动获取正式文章链接，请在创作中心查看";
-                log.info("Zhihu publish result success by success text: taskId={}, publishUrl={}", context.taskId(), publishUrl);
-                return PublishResult.success(publishUrl, message);
-            }
-            String validationError = visiblePublishValidationError(page);
-            if (StringUtils.hasText(validationError)) {
-                log.warn("Zhihu publish validation error detected: reason={}", validationError);
-                return PublishResult.failed("知乎发布失败：" + validationError);
-            }
-            if (!triedManagePage && elapsed(startedAt) > 8_000) {
-                triedManagePage = true;
-                navigateToManagePage(page, config);
-            }
-            if (triedManagePage && managePagePublishedTitleMatch(page, context.title())) {
-                articleUrl = extractArticleUrl(page, context.title());
-                String publishUrl = isZhihuArticleUrl(articleUrl) ? articleUrl : fallbackManageUrl(config);
-                String message = isZhihuArticleUrl(publishUrl)
-                        ? "知乎发布成功"
-                        : "知乎发布成功，但未自动获取正式文章链接，请在创作中心查看";
-                log.info("Zhihu publish result success by manage page match: taskId={}, publishUrl={}", context.taskId(), publishUrl);
-                return PublishResult.success(publishUrl, message);
-            }
-            sleep(1_000);
-        }
-        log.warn("Zhihu publish result failed reason=link-fetch-failed currentUrl={}", safeUrl(page));
-        return PublishResult.linkFetchFailed(fallbackManageUrl(config), "知乎发布后未能确认结果，请在知乎创作中心检查");
-    }
-
-    private boolean visiblePublishSuccessText(Page page) {
-        String snapshot = pageSnapshot(page);
-        return containsAny(snapshot, List.of("发布成功", "已发布", "提交成功", "审核中"));
-    }
-
-    private boolean looksContentRejected(String snapshot) {
-        return containsAny(snapshot, List.of("审核失败", "审核未通过", "内容违规", "违规", "未通过审核", "发布失败"));
-    }
-
-    private String visiblePublishValidationError(Page page) {
-        String snapshot = pageSnapshot(page);
-        if (containsAny(snapshot, List.of("请添加话题", "请填写话题", "请选择话题"))) {
-            return "文章话题未填写";
-        }
-        if (containsAny(snapshot, List.of("内容不能为空", "正文不能为空", "标题不能为空", "请填写正文", "请填写标题"))) {
-            return "标题或正文未填写";
-        }
-        return "";
-    }
-
-    private boolean publishDialogDetected(Page page) {
-        try {
-            Object detected = page.evaluate("""
-                    () => {
-                      const text = value => (value || '').replace(/\\s+/g, ' ').trim();
-                      const visible = element => {
-                        if (!element || element.closest('script, style, template') || element.getAttribute('aria-hidden') === 'true') return false;
-                        const rect = element.getBoundingClientRect();
-                        const style = window.getComputedStyle(element);
-                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
-                      };
-                      return Array.from(document.querySelectorAll('[role="dialog"], .Modal, .modal, [class*="Modal"], [class*="modal"], [class*="Dialog"], [class*="dialog"]'))
-                        .filter(visible)
-                        .some(root => {
-                          const snapshot = text(root.innerText || root.textContent || '');
-                          return snapshot.includes('发布') && !snapshot.includes('登录知乎');
-                        });
-                    }
-                    """);
-            return Boolean.TRUE.equals(detected);
-        } catch (RuntimeException ignored) {
-            return false;
-        }
-    }
-
     private boolean topicPromptVisible(Page page) {
         String snapshot = pageSnapshot(page);
         return containsAny(snapshot, List.of("添加话题", "文章话题", "选择话题"));
-    }
-
-    private boolean managePagePublishedTitleMatch(Page page, String title) {
-        if (!StringUtils.hasText(title)) {
-            return false;
-        }
-        return snapshotContainsContent(pageSnapshot(page), title);
-    }
-
-    private String extractArticleUrl(Page page, String title) {
-        try {
-            Object value = page.evaluate("""
-                    title => {
-                      const normalize = value => (value || '').replace(/\\s+/g, ' ').trim();
-                      const visible = element => {
-                        if (!element || element.closest('script, style, template') || element.getAttribute('aria-hidden') === 'true') return false;
-                        const rect = element.getBoundingClientRect();
-                        const style = window.getComputedStyle(element);
-                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-                      };
-                      const titleText = normalize(title);
-                      const candidates = Array.from(document.querySelectorAll('a[href]'))
-                        .filter(visible)
-                        .map(link => ({ href: link.href || '', text: normalize(link.innerText || link.textContent || '') }))
-                        .filter(item => item.href.includes('zhihu.com') && (item.href.includes('/p/') || item.href.includes('/question/')));
-                      const exact = candidates.find(item => titleText && item.text.includes(titleText));
-                      return (exact || candidates[0] || {}).href || '';
-                    }
-                    """, title);
-            return value instanceof String text ? text : "";
-        } catch (RuntimeException ignored) {
-            return "";
-        }
     }
 
     private boolean titleFilled(Page page, String title) {
@@ -1336,29 +1066,6 @@ public class ZhihuBrowserPublisher implements PlatformPublisher {
     private boolean isZhihuEditorPage(Page page) {
         String url = safeUrl(page);
         return isZhihuPage(page) && (url.contains("/write") || hasEditorDom(page));
-    }
-
-    private boolean isZhihuArticleUrl(String url) {
-        return StringUtils.hasText(url)
-                && !url.contains("/edit")
-                && !url.contains("/write")
-                && (url.contains("zhuanlan.zhihu.com/p/")
-                || (url.contains("zhihu.com") && url.contains("/p/"))
-                || (url.contains("zhihu.com/question/") && url.contains("/answer/")));
-    }
-
-    private void navigateToManagePage(Page page, BrowserPublisherConfig config) {
-        try {
-            page.navigate(fallbackManageUrl(config), new Page.NavigateOptions()
-                    .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
-                    .setTimeout(10_000));
-        } catch (RuntimeException ignored) {
-            // Result detection continues on current page.
-        }
-    }
-
-    private String fallbackManageUrl(BrowserPublisherConfig config) {
-        return StringUtils.hasText(config.manageUrl()) ? config.manageUrl() : DEFAULT_MANAGE_URL;
     }
 
     private void writeClipboard(Page page, String value) {
