@@ -56,10 +56,19 @@ vim .env
 - `DB_PASSWORD`，与 `MYSQL_PASSWORD` 保持一致
 - `JWT_SECRET`，使用足够长的随机字符串
 - `VNC_PASSWORD`，使用强密码，为空时后端容器必须拒绝启动
+- `PLATFORM_CREDENTIAL_KEY`，Base64 编码的 32 字节 AES 密钥，用于加密平台账号认证配置
 - `DEEPSEEK_API_KEY`
 - `EXA_API_KEY`，如需联网调研
 
 不要提交 `.env`。不要把密码、Cookie、Token 或浏览器用户目录写入镜像或 Git。
+
+可生成平台凭证密钥：
+
+```bash
+openssl rand -base64 32
+```
+
+将结果原样写入 `PLATFORM_CREDENTIAL_KEY`。该密钥必须持久备份并限制访问；丢失或更换后，已有 `enc:v1:` 平台账号密文将无法解密。升级前已有明文账号可以继续读取，但配置密钥后应逐个编辑保存，使数据库值转换为 `enc:v1:` 密文；当前版本不自动批量迁移。
 
 ## 4. 启动和验证
 
@@ -177,4 +186,5 @@ docker volume inspect ai-content-marketing-system_mysql-data
 - `docker compose ps` 不向公网发布 3306、8080、5900 或 6080。
 - 公网 HTTP 自动跳转 HTTPS。
 - Git 和容器日志中没有 Cookie、Token、API Key 或密码。
+- `PLATFORM_CREDENTIAL_KEY` 已配置且稳定备份，平台账号 `auth_config` 已从旧明文迁移为 `enc:v1:` 密文。
 - CSDN、知乎自动化只做内容填充，不点击最终发布。

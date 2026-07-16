@@ -69,8 +69,9 @@ AI内容营销系统是公司内部运营工具，前端采用科技极简的后
 - 表单保存成功后显示短提示，不跳转页面。
 - 接口失败显示后端返回 message；401 统一清登录态并跳转登录页。
 - 空状态使用简短说明，避免长篇解释。
-- 发布任务页只展示当前状态机中的 `DRAFT`、`PENDING`、`RUNNING`、`SUCCESS`、`FAILED`、`CANCELLED`。
-- `FAILED` 任务必须支持换行展示失败原因；`SUCCESS` 任务只在存在发布链接时显示“查看文章”。
+- 发布任务页展示 `DRAFT`、`PENDING`、`RUNNING`、`WAITING_MANUAL_CONFIRM`、`FAILED`、`CANCELLED`；`SUCCESS` 仅用于历史数据展示。
+- `FAILED` 任务必须支持换行展示失败原因；`WAITING_MANUAL_CONFIRM` 显示“等待人工发布”，并按平台提供“打开草稿”或“打开编辑器”。
+- 新流程不显示“自动发布成功”或“已发布”等系统无法证明的结论。
 
 ## 10. 后续页面开发注意事项
 
