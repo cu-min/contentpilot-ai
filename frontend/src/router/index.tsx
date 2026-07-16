@@ -9,7 +9,6 @@ import Product from '../pages/Product';
 import Platform from '../pages/Platform';
 import Publish from '../pages/Publish';
 import User from '../pages/User';
-import GrowthTracking from '../pages/Growth/Tracking';
 import { LoginRoute, ProtectedRoute } from './RouteGuards';
 
 export const router = createBrowserRouter([
@@ -38,7 +37,6 @@ export const router = createBrowserRouter([
       { path: 'product', element: <Product /> },
       { path: 'platform', element: <Platform /> },
       { path: 'publish', element: <Publish /> },
-      { path: 'growth/tracking', element: <GrowthTracking /> },
       {
         path: 'user',
         element: (
