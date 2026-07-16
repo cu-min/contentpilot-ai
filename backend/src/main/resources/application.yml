@@ -30,3 +30,8 @@ jwt:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost,http://localhost:5173}
+
+platform:
+  credentials:
+    key: ${PLATFORM_CREDENTIAL_KEY:}
+    required: false

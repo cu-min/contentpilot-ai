@@ -1,6 +1,7 @@
 package com.aicontent.marketing.publish.service;
 
 import com.aicontent.marketing.common.exception.BusinessException;
+import com.aicontent.marketing.common.security.PlatformCredentialCipher;
 import com.aicontent.marketing.platform.entity.PlatformAccount;
 import com.aicontent.marketing.platform.mapper.PlatformAccountMapper;
 import com.aicontent.marketing.platformcontent.entity.ArticlePlatformContent;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.util.Base64;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -208,6 +210,31 @@ class PublishTaskServiceImplTest {
     }
 
     @Test
+    void preparationDecryptsAccountConfigBeforeCallingPublisher() {
+        String key = Base64.getEncoder().encodeToString(new byte[32]);
+        PlatformCredentialCipher cipher = new PlatformCredentialCipher(key);
+        String plaintext = "{\"cookie\":\"sid=ok\"}";
+        PublishTask task = executableTask();
+        PlatformAccount account = enabledAccount();
+        account.setAuthConfig(cipher.encrypt(plaintext));
+        PlatformPublisher publisher = mock(PlatformPublisher.class);
+        when(publisherRegistry.getPublisher("JUEJIN", "UNOFFICIAL_API")).thenReturn(publisher);
+        when(publisher.publish(any())).thenAnswer(invocation -> {
+            var context = (com.aicontent.marketing.publish.publisher.PublishContext) invocation.getArgument(0);
+            assertEquals(plaintext, context.accountAuthConfig());
+            return PublishResult.prepared("draft-123", "https://juejin.cn/editor/drafts/draft-123", "ready");
+        });
+        when(contentMapper.selectById(2L)).thenReturn(platformContent());
+        when(accountMapper.selectById(4L)).thenReturn(account);
+        PublishTaskServiceImpl service = spy(service(cipher));
+        doReturn(task).when(service).getById(1L);
+        doReturn(true).when(service).update(any(LambdaUpdateWrapper.class));
+        doReturn(true).when(service).updateById(task);
+
+        assertEquals("WAITING_MANUAL_CONFIRM", service.prepareTask(1L, 9L).getStatus());
+    }
+
+    @Test
     void submitFailsWhenAtomicDraftTransitionLosesRace() {
         PublishTaskServiceImpl service = spy(service());
         doReturn(draftTask()).when(service).getById(1L);
@@ -217,10 +244,15 @@ class PublishTaskServiceImplTest {
     }
 
     private PublishTaskServiceImpl service() {
+        return service(new PlatformCredentialCipher(""));
+    }
+
+    private PublishTaskServiceImpl service(PlatformCredentialCipher cipher) {
         return new PublishTaskServiceImpl(
                 contentMapper,
                 accountMapper,
-                publisherRegistry
+                publisherRegistry,
+                cipher
         );
     }
 

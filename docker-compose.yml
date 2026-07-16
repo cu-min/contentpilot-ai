@@ -54,6 +54,7 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       VNC_PASSWORD: ${VNC_PASSWORD}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
+      PLATFORM_CREDENTIAL_KEY: ${PLATFORM_CREDENTIAL_KEY:?PLATFORM_CREDENTIAL_KEY is required}
     volumes:
       - backend-logs:/app/logs
       - playwright-browser-data:/app/browser-data
