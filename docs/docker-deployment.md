@@ -1,25 +1,25 @@
 # Docker 部署指南
 
-本文说明如何用 Docker Compose 在腾讯云服务器部署 AI 内容营销系统，并支持 CSDN、知乎的 Playwright 可视化浏览器自动化。
+本文说明如何用 Docker Compose 部署 AI 内容营销系统，并通过受保护的 noVNC 访问 CSDN、知乎编辑器。系统只自动填充到最终发布按钮前，不自动完成发布。
 
-## 1. 腾讯云服务器准备
+## 1. 服务器与端口
 
-推荐使用 Ubuntu 22.04 LTS 或更新的 Ubuntu 发行版。2 核 2G 可以运行基础系统，但 Playwright Chromium、Xvfb、VNC/noVNC 会消耗较多内存；如果同时执行多个浏览器发布任务，建议至少 2 核 4G。
+推荐 Ubuntu 22.04 LTS 或更新版本。基础系统可以使用 2 核 2G，运行 Playwright Chromium、Xvfb 和 noVNC 时建议至少 2 核 4G。
 
-安全组建议开放：
+公网安全组只开放：
 
-- `22`：SSH 登录
-- `80`：前端访问
-- `6080`：noVNC 访问，用于登录和观察浏览器
+- `22`：SSH，建议限制来源 IP 并使用密钥登录。
+- `80`：仅用于跳转 HTTPS。
+- `443`：系统 HTTPS 访问。
 
-不建议开放：
+不向公网开放：
 
-- `3306`：MySQL 仅在 Docker Compose 内部访问
-- `8080`：后端由前端 Nginx 通过 `/api` 反向代理访问，生产环境通常不需要公网开放
+- `3306`：MySQL 只在 Compose 内部访问。
+- `8080`：后端由前端 Nginx 通过 `/api` 反向代理。
+- `5900`：VNC 仅在容器内使用。
+- `6080`：noVNC 必须只绑定宿主机 `127.0.0.1`，不得在安全组中开放。
 
-`6080` 建议限制来源 IP，或至少使用强 `VNC_PASSWORD`。
-
-## 2. 安装 Docker 和 Docker Compose
+## 2. 安装 Docker
 
 ```bash
 sudo apt-get update
@@ -40,41 +40,32 @@ docker version
 docker compose version
 ```
 
-## 3. 克隆项目
+## 3. 获取项目和环境变量
 
 ```bash
 git clone <你的仓库地址>
 cd ai-content-marketing-system
-```
-
-## 4. 配置环境变量
-
-```bash
 cp .env.example .env
 vim .env
 ```
 
-至少修改以下值：
+生产环境至少需要：
 
 - `MYSQL_ROOT_PASSWORD`
 - `MYSQL_PASSWORD`
-- `DB_PASSWORD`：需与 `MYSQL_PASSWORD` 一致
-- `JWT_SECRET`：使用足够长的随机字符串
+- `DB_PASSWORD`，与 `MYSQL_PASSWORD` 保持一致
+- `JWT_SECRET`，使用足够长的随机字符串
+- `VNC_PASSWORD`，使用强密码，为空时后端容器必须拒绝启动
 - `DEEPSEEK_API_KEY`
-- `EXA_API_KEY`
-- `VNC_PASSWORD`
+- `EXA_API_KEY`，如需联网调研
 
-不要提交 `.env`。
+不要提交 `.env`。不要把密码、Cookie、Token 或浏览器用户目录写入镜像或 Git。
 
-## 5. 启动服务
+## 4. 启动和验证
 
 ```bash
+docker compose config
 docker compose up -d --build
-```
-
-查看状态：
-
-```bash
 docker compose ps
 ```
 
@@ -86,27 +77,36 @@ docker compose logs -f frontend
 docker compose logs -f mysql
 ```
 
-## 6. 访问系统
+前端 Nginx 将 `/api/` 代理到 `backend:8080`，SPA 页面刷新回退到 `index.html`。公网使用前必须配置 HTTPS，并将 HTTP 重定向到 HTTPS。
 
-前端访问：
+## 5. 安全访问 noVNC
 
-```text
-http://服务器公网IP
+Compose 中 noVNC 的主机绑定必须是：
+
+```yaml
+ports:
+  - "127.0.0.1:6080:6080"
 ```
 
-前端 Nginx 会把 `/api/` 代理到 `backend:8080`，SPA 页面刷新会回退到 `index.html`。
+禁止使用 `0.0.0.0:6080`或直接 `6080:6080`对公网发布。后端启动脚本必须在 `VNC_PASSWORD` 为空时退出，禁止使用 x11vnc `-nopw`。
 
-noVNC 访问：
+在本机建立 SSH 隧道：
 
-```text
-http://服务器公网IP:6080
+```bash
+ssh -N -L 6080:127.0.0.1:6080 <user>@<server>
 ```
 
-输入 `.env` 中配置的 `VNC_PASSWORD`。noVNC 用于在后端容器内查看 Playwright Chromium 窗口，完成 CSDN、知乎首次登录并观察自动化发布过程。
+然后仅在本机浏览器打开：
 
-## 7. CSDN / 知乎登录态准备
+```text
+http://127.0.0.1:6080
+```
 
-Docker 部署后，浏览器登录态必须保存在容器内路径，不能继续使用本机 Mac 路径。请在平台管理页面的 `auth_config` 中配置。
+输入 `.env` 中的强 `VNC_PASSWORD`。noVNC 只用于首次登录、检查编辑器填充结果和人工点击最终发布。
+
+## 6. CSDN / 知乎登录态
+
+容器内浏览器登录态必须保存到持久化路径。
 
 CSDN 示例：
 
@@ -115,12 +115,10 @@ CSDN 示例：
   "browserUserDataDir": "/app/browser-data/csdn",
   "editorUrl": "https://editor.csdn.net/md/?not_checkout=1",
   "manageUrl": "https://mp.csdn.net/mp_blog/manage/article",
-  "defaultTags": ["Java", "前端", "编程语言"],
+  "defaultTags": ["Java", "Spring Boot", "AI"],
   "defaultCategory": "后端",
   "defaultColumn": "",
-  "defaultSummary": "",
-  "manualConfirm": false,
-  "autoPublish": true
+  "defaultSummary": ""
 }
 ```
 
@@ -131,50 +129,29 @@ CSDN 示例：
   "browserUserDataDir": "/app/browser-data/zhihu",
   "editorUrl": "https://zhuanlan.zhihu.com/write",
   "manageUrl": "https://www.zhihu.com/creator",
-  "defaultTopics": ["科学", "生活", "互联网"],
+  "defaultTopics": ["项目管理", "效率工具"],
   "defaultColumn": "",
-  "manualConfirm": false,
-  "autoPublish": true,
   "waitAfterFillMs": 1000
 }
 ```
 
+不配置 `autoPublish=true`。旧配置中即使存在 `autoPublish`、`manualConfirm` 或 `draftOnly`，新流程也必须停在人工发布前。
+
 操作顺序：
 
-1. 打开 noVNC。
-2. 在容器浏览器中登录 CSDN / 知乎。
-3. 平台账号 `auth_config` 使用 `/app/browser-data/csdn` 和 `/app/browser-data/zhihu`。
-4. 登录成功后再执行发布任务。
+1. 通过 SSH 隧道打开 noVNC。
+2. 在容器浏览器中登录 CSDN 和知乎。
+3. 平台账号使用 `/app/browser-data/csdn` 或 `/app/browser-data/zhihu`。
+4. 执行“准备发布”。
+5. 任务进入 `WAITING_MANUAL_CONFIRM` 后，在 noVNC 中检查内容并人工点击。
 
-## 8. 常用命令
-
-重启后端：
+## 7. 常用命令
 
 ```bash
 docker compose restart backend
-```
-
-重启全部服务：
-
-```bash
 docker compose restart
-```
-
-停止服务：
-
-```bash
 docker compose down
-```
-
-重新构建：
-
-```bash
 docker compose up -d --build
-```
-
-清理容器但保留数据卷：
-
-```bash
 docker compose down --remove-orphans
 ```
 
@@ -185,18 +162,19 @@ docker volume ls | grep mysql
 docker volume inspect ai-content-marketing-system_mysql-data
 ```
 
-## 9. 常见问题
+## 8. 常见问题
 
-页面打不开：检查腾讯云安全组是否开放 `80`，并确认 `frontend` 容器正常。
+- 页面打不开：检查 `443`、TLS 证书和 `frontend` 容器。
+- 接口 404：检查 `frontend/nginx.conf` 的 `/api/` 代理和 `backend:8080`。
+- 后端连不上数据库：检查 `DB_HOST=mysql`、`DB_PASSWORD` 和 `MYSQL_PASSWORD`。
+- noVNC 打不开：确认 SSH 隧道存在、Compose 只绑定 `127.0.0.1:6080` 且 `VNC_PASSWORD` 非空；不要开放公网 6080。
+- CSDN / 知乎提示登录：通过 noVNC 在容器浏览器内重新登录，不绕过验证。
+- 2G 内存浏览器卡顿：减少同时准备的任务，必要时升级配置。
 
-接口 404：检查 `frontend/nginx.conf` 的 `/api/` 代理配置，以及后端是否在 `backend:8080` 正常启动。
+## 9. 交付前安全检查
 
-后端连不上数据库：检查 `.env` 中 `DB_HOST=mysql`、`DB_PASSWORD` 和 `MYSQL_PASSWORD` 是否一致，查看 `docker compose logs -f mysql`。
-
-Playwright 下载慢：Chromium 已在后端镜像构建阶段安装到 `/ms-playwright`，运行时不应再临时下载浏览器。
-
-noVNC 打不开：检查安全组是否开放 `6080`，确认 `VNC_PASSWORD` 已配置，并查看 `docker compose logs -f backend`。
-
-CSDN / 知乎提示登录：需要通过 noVNC 在容器浏览器内登录，且平台账号 `auth_config.browserUserDataDir` 必须使用 `/app/browser-data/csdn` 或 `/app/browser-data/zhihu`。
-
-2G 内存浏览器卡顿：减少同时执行的发布任务，必要时升级服务器配置。
+- `docker compose config` 不包含空的 DB、JWT 或 VNC 密钥。
+- `docker compose ps` 不向公网发布 3306、8080、5900 或 6080。
+- 公网 HTTP 自动跳转 HTTPS。
+- Git 和容器日志中没有 Cookie、Token、API Key 或密码。
+- CSDN、知乎自动化只做内容填充，不点击最终发布。
