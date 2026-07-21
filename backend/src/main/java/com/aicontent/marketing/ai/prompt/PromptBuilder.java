@@ -33,10 +33,6 @@ public class PromptBuilder {
                 """;
     }
 
-    public String buildUserPrompt(ProductConfigVO productConfig, AiArticleGenerateRequest request) {
-        return buildUserPrompt(productConfig, request, new ResearchBrief());
-    }
-
     public String buildUserPrompt(ProductConfigVO productConfig, AiArticleGenerateRequest request, ResearchBrief researchBrief) {
         return """
                 %s

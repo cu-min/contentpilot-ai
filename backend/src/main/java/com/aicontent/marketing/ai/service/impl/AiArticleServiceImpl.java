@@ -9,7 +9,7 @@ import com.aicontent.marketing.ai.research.ResearchBrief;
 import com.aicontent.marketing.ai.research.ResearchService;
 import com.aicontent.marketing.ai.service.AiArticleService;
 import com.aicontent.marketing.ai.service.AiGeneratedArticlePersistenceService;
-import com.aicontent.marketing.ai.service.AiModelService;
+import com.aicontent.marketing.ai.client.DeepSeekClient;
 import com.aicontent.marketing.ai.vo.AiArticleGenerateSubmitVO;
 import com.aicontent.marketing.ai.vo.AiGenerationTaskVO;
 import com.aicontent.marketing.ai.vo.AiGeneratedArticle;
@@ -43,7 +43,7 @@ public class AiArticleServiceImpl implements AiArticleService {
     private static final Set<String> IN_PROGRESS_STATUSES = Set.of(PENDING, SEARCHING, WRITING, SAVING);
 
     private final ProductConfigService productConfigService;
-    private final AiModelService aiModelService;
+    private final DeepSeekClient deepSeekClient;
     private final PromptBuilder promptBuilder;
     private final AiJsonParser aiJsonParser;
     private final ResearchService researchService;
@@ -54,7 +54,7 @@ public class AiArticleServiceImpl implements AiArticleService {
 
     public AiArticleServiceImpl(
             ProductConfigService productConfigService,
-            AiModelService aiModelService,
+            DeepSeekClient deepSeekClient,
             PromptBuilder promptBuilder,
             AiJsonParser aiJsonParser,
             ResearchService researchService,
@@ -64,7 +64,7 @@ public class AiArticleServiceImpl implements AiArticleService {
             @Qualifier("aiGenerationTaskExecutor") Executor taskExecutor
     ) {
         this.productConfigService = productConfigService;
-        this.aiModelService = aiModelService;
+        this.deepSeekClient = deepSeekClient;
         this.promptBuilder = promptBuilder;
         this.aiJsonParser = aiJsonParser;
         this.researchService = researchService;
@@ -123,7 +123,7 @@ public class AiArticleServiceImpl implements AiArticleService {
             updateStatus(taskId, WRITING, "资料已准备，正在生成文章");
             String systemPrompt = promptBuilder.buildSystemPrompt();
             String userPrompt = promptBuilder.buildUserPrompt(productConfig, request, researchBrief);
-            String rawResult = aiModelService.chat(systemPrompt, userPrompt);
+            String rawResult = deepSeekClient.chat(systemPrompt, userPrompt);
             AiGeneratedArticle generatedArticle = aiJsonParser.parseGeneratedArticle(rawResult);
 
             updateStatus(taskId, SAVING, "正在保存文章和资料来源");

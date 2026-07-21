@@ -1,7 +1,6 @@
 import { Tag } from 'antd';
-import type { ArticleLanguage, ArticleStatus, ArticleType } from '../../types/article';
+import type { ArticleStatus, ArticleType } from '../../types/article';
 import {
-  getArticleLanguageLabel,
   getArticleStatusLabel,
   getArticleTypeLabel,
 } from '../../types/article';
@@ -12,10 +11,6 @@ interface ArticleStatusTagProps {
 
 interface ArticleTypeTagProps {
   type: ArticleType;
-}
-
-interface LanguageTagProps {
-  language: ArticleLanguage;
 }
 
 const statusColors: Record<ArticleStatus, string> = {
@@ -43,6 +38,3 @@ export function ArticleTypeTag({ type }: ArticleTypeTagProps) {
   return <Tag color={typeColors[type]}>{getArticleTypeLabel(type)}</Tag>;
 }
 
-export function LanguageTag({ language }: LanguageTagProps) {
-  return <Tag color={language === 'ZH' ? 'purple' : 'cyan'}>{getArticleLanguageLabel(language)}</Tag>;
-}

@@ -65,8 +65,6 @@ services:
       - "5900"
     ports:
       - "127.0.0.1:${NOVNC_PORT:-6080}:6080"
-      # For local backend debugging only. Do not expose 8080 publicly in production.
-      # - "8080:8080"
 
   frontend:
     build:

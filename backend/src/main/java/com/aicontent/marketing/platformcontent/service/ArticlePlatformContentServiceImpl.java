@@ -1,7 +1,7 @@
 package com.aicontent.marketing.platformcontent.service;
 
 import com.aicontent.marketing.ai.parser.AiJsonParser;
-import com.aicontent.marketing.ai.service.AiModelService;
+import com.aicontent.marketing.ai.client.DeepSeekClient;
 import com.aicontent.marketing.ai.vo.AiGeneratedArticle;
 import com.aicontent.marketing.article.entity.Article;
 import com.aicontent.marketing.article.mapper.ArticleMapper;
@@ -35,7 +35,7 @@ public class ArticlePlatformContentServiceImpl extends ServiceImpl<ArticlePlatfo
 
     private final ArticleMapper articleMapper;
     private final ProductConfigService productConfigService;
-    private final AiModelService aiModelService;
+    private final DeepSeekClient deepSeekClient;
     private final AiJsonParser aiJsonParser;
     private final PlatformContentPromptBuilder promptBuilder;
     private final PlatformAdaptRuleFactory ruleFactory;
@@ -43,14 +43,14 @@ public class ArticlePlatformContentServiceImpl extends ServiceImpl<ArticlePlatfo
     public ArticlePlatformContentServiceImpl(
             ArticleMapper articleMapper,
             ProductConfigService productConfigService,
-            AiModelService aiModelService,
+            DeepSeekClient deepSeekClient,
             AiJsonParser aiJsonParser,
             PlatformContentPromptBuilder promptBuilder,
             PlatformAdaptRuleFactory ruleFactory
     ) {
         this.articleMapper = articleMapper;
         this.productConfigService = productConfigService;
-        this.aiModelService = aiModelService;
+        this.deepSeekClient = deepSeekClient;
         this.aiJsonParser = aiJsonParser;
         this.promptBuilder = promptBuilder;
         this.ruleFactory = ruleFactory;
@@ -136,7 +136,7 @@ public class ArticlePlatformContentServiceImpl extends ServiceImpl<ArticlePlatfo
             Long currentUserId
     ) {
         String userPrompt = promptBuilder.buildUserPrompt(productConfig, article, platform, extraRequirement);
-        String rawResult = aiModelService.chat(promptBuilder.buildSystemPrompt(), userPrompt);
+        String rawResult = deepSeekClient.chat(promptBuilder.buildSystemPrompt(), userPrompt);
         AiGeneratedArticle generatedArticle = aiJsonParser.parseGeneratedArticle(rawResult);
 
         LocalDateTime now = LocalDateTime.now();

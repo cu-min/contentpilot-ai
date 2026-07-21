@@ -248,10 +248,8 @@ flowchart LR
 本项目采用轻量的 Team Lead、架构、前端、后端和 QA 协作模型。前后端在独立 Git Worktree 中并行实现，架构 Agent 负责必要契约和集成审查，QA 在集成结果上验证。
 
 - 项目规则：`AGENTS.md`
-- 协作流程：`docs/agent/multi-agent-workflow.md`
 - 文件所有权：`docs/agent/ownership.md`
 - Worktree 使用：`docs/agent/worktrees.md`
-- 任务模板：`docs/agent/task-template.md`
 
 ## 本地运行
 
@@ -336,12 +334,13 @@ http://localhost:5173
 
 ## 相关文档
 
-- `docs/AI_Content_Marketing_System_Product_Design_MVP.md`
-- `docs/project-progress-summary.md`
-- `docs/ai-generation.md`
-- `docs/platform-content-adaptation.md`
-- `docs/platform-publishing-strategy-reference.md`
-- `docs/contracts/manual-publish-handoff.md`
+- `docs/project-progress-summary.md` — 项目进展总览与当前状态
+- `docs/product-strategy-notes.md` — 产品策略反思与后续方向
+- `docs/platform-content-adaptation.md` — 多平台内容改写规则
+- `docs/platform-publishing-strategy-reference.md` — 平台发布策略与安全边界
+- `docs/docker-deployment.md` — Docker 部署与运维指南
+- `docs/frontend-design-system.md` — 前端设计规范
+- `docs/contracts/manual-publish-handoff.md` — 人工发布交接契约
 
 ## License
 

@@ -5,8 +5,7 @@
 1. `README.md`
 2. `docs/project-progress-summary.md`
 3. 与任务直接相关的产品或技术文档
-4. `docs/agent/multi-agent-workflow.md`
-5. `docs/agent/ownership.md`
+4. `docs/agent/ownership.md`
 
 ## 协作模型
 
