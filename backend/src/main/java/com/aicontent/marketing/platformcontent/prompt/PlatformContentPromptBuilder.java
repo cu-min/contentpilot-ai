@@ -2,7 +2,7 @@ package com.aicontent.marketing.platformcontent.prompt;
 
 import com.aicontent.marketing.article.entity.Article;
 import com.aicontent.marketing.platformcontent.rule.PlatformAdaptRule;
-import com.aicontent.marketing.platformcontent.rule.PlatformAdaptRuleFactory;
+import com.aicontent.marketing.platformcontent.rule.PlatformAdaptRules;
 import com.aicontent.marketing.product.vo.ProductConfigVO;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -12,10 +12,10 @@ import java.util.List;
 @Component
 public class PlatformContentPromptBuilder {
 
-    private final PlatformAdaptRuleFactory ruleFactory;
+    private final PlatformAdaptRules platformAdaptRules;
 
-    public PlatformContentPromptBuilder(PlatformAdaptRuleFactory ruleFactory) {
-        this.ruleFactory = ruleFactory;
+    public PlatformContentPromptBuilder(PlatformAdaptRules platformAdaptRules) {
+        this.platformAdaptRules = platformAdaptRules;
     }
 
     public String buildSystemPrompt() {
@@ -41,7 +41,7 @@ public class PlatformContentPromptBuilder {
             String platform,
             String extraRequirement
     ) {
-        PlatformAdaptRule rule = ruleFactory.getRule(platform);
+        PlatformAdaptRule rule = platformAdaptRules.getRule(platform);
         return """
                 请基于以下上下文和原始文章，生成适合目标平台发布的内容稿。
                 注意：本任务是平台化内容重组，不是扩写，也不是逐段复制原文。

@@ -190,11 +190,6 @@ public class PublishTaskServiceImpl extends ServiceImpl<PublishTaskMapper, Publi
         return prepareClaimedTask(getRequiredTask(id), currentUserId);
     }
 
-    @Override
-    public PublishTaskVO executeTask(Long id, Long currentUserId) {
-        return prepareTask(id, currentUserId);
-    }
-
     private boolean claimPendingTask(Long id, Long currentUserId) {
         LambdaUpdateWrapper<PublishTask> wrapper = new LambdaUpdateWrapper<PublishTask>()
                 .eq(PublishTask::getId, id)

@@ -12,7 +12,7 @@ import com.aicontent.marketing.platformcontent.dto.PlatformContentUpdateRequest;
 import com.aicontent.marketing.platformcontent.entity.ArticlePlatformContent;
 import com.aicontent.marketing.platformcontent.mapper.ArticlePlatformContentMapper;
 import com.aicontent.marketing.platformcontent.prompt.PlatformContentPromptBuilder;
-import com.aicontent.marketing.platformcontent.rule.PlatformAdaptRuleFactory;
+import com.aicontent.marketing.platformcontent.rule.PlatformAdaptRules;
 import com.aicontent.marketing.platformcontent.vo.ArticlePlatformContentVO;
 import com.aicontent.marketing.product.service.ProductConfigService;
 import com.aicontent.marketing.product.vo.ProductConfigVO;
@@ -38,7 +38,7 @@ public class ArticlePlatformContentServiceImpl extends ServiceImpl<ArticlePlatfo
     private final DeepSeekClient deepSeekClient;
     private final AiJsonParser aiJsonParser;
     private final PlatformContentPromptBuilder promptBuilder;
-    private final PlatformAdaptRuleFactory ruleFactory;
+    private final PlatformAdaptRules platformAdaptRules;
 
     public ArticlePlatformContentServiceImpl(
             ArticleMapper articleMapper,
@@ -46,14 +46,14 @@ public class ArticlePlatformContentServiceImpl extends ServiceImpl<ArticlePlatfo
             DeepSeekClient deepSeekClient,
             AiJsonParser aiJsonParser,
             PlatformContentPromptBuilder promptBuilder,
-            PlatformAdaptRuleFactory ruleFactory
+            PlatformAdaptRules platformAdaptRules
     ) {
         this.articleMapper = articleMapper;
         this.productConfigService = productConfigService;
         this.deepSeekClient = deepSeekClient;
         this.aiJsonParser = aiJsonParser;
         this.promptBuilder = promptBuilder;
-        this.ruleFactory = ruleFactory;
+        this.platformAdaptRules = platformAdaptRules;
     }
 
     @Override
@@ -188,7 +188,7 @@ public class ArticlePlatformContentServiceImpl extends ServiceImpl<ArticlePlatfo
 
         LinkedHashSet<String> normalized = new LinkedHashSet<>();
         for (String platform : platforms) {
-            if (!ruleFactory.supports(platform)) {
+            if (!platformAdaptRules.supports(platform)) {
                 throw new BusinessException("platform is invalid");
             }
             normalized.add(platform);

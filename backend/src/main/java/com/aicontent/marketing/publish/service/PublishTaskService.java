@@ -24,6 +24,4 @@ public interface PublishTaskService extends IService<PublishTask> {
 
     PublishTaskVO prepareTask(Long id, Long currentUserId);
 
-    PublishTaskVO executeTask(Long id, Long currentUserId);
-
 }

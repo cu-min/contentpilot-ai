@@ -4,8 +4,10 @@ import com.aicontent.marketing.common.exception.BusinessException;
 import com.aicontent.marketing.publish.publisher.PlatformPublisher;
 import com.aicontent.marketing.publish.publisher.PublishContext;
 import com.aicontent.marketing.publish.publisher.PublishResult;
-import com.aicontent.marketing.publish.service.markdown.MarkdownToWechatHtmlService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.commonmark.node.Node;
+import org.commonmark.parser.Parser;
+import org.commonmark.renderer.html.HtmlRenderer;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -19,18 +21,15 @@ public class WechatOfficialApiPublisher implements PlatformPublisher {
 
     private final WechatClient wechatClient;
     private final WechatAccessTokenCache accessTokenCache;
-    private final MarkdownToWechatHtmlService markdownToWechatHtmlService;
     private final ObjectMapper objectMapper;
 
     public WechatOfficialApiPublisher(
             WechatClient wechatClient,
             WechatAccessTokenCache accessTokenCache,
-            MarkdownToWechatHtmlService markdownToWechatHtmlService,
             ObjectMapper objectMapper
     ) {
         this.wechatClient = wechatClient;
         this.accessTokenCache = accessTokenCache;
-        this.markdownToWechatHtmlService = markdownToWechatHtmlService;
         this.objectMapper = objectMapper;
     }
 
@@ -50,7 +49,7 @@ public class WechatOfficialApiPublisher implements PlatformPublisher {
             validateContext(context);
             WechatAuthConfig config = WechatAuthConfig.parse(context.accountAuthConfig(), objectMapper);
             String accessToken = accessTokenCache.getToken(config.appId(), config.appSecret(), wechatClient);
-            String htmlContent = markdownToWechatHtmlService.convert(context.content());
+            String htmlContent = convertMarkdownToHtml(context.content());
             WechatDraftAddResponse response = wechatClient.createDraft(accessToken, new WechatDraftAddRequest(List.of(
                     new WechatDraftAddRequest.Article(
                             normalize(context.title(), "未命名公众号草稿"),
@@ -86,6 +85,14 @@ public class WechatOfficialApiPublisher implements PlatformPublisher {
         if (!context.accountConfigExists() || !StringUtils.hasText(context.accountAuthConfig())) {
             throw new BusinessException("微信公众号认证配置未配置");
         }
+    }
+
+    private String convertMarkdownToHtml(String markdown) {
+        if (!StringUtils.hasText(markdown)) {
+            throw new BusinessException("公众号正文内容不能为空");
+        }
+        Node document = Parser.builder().build().parse(markdown);
+        return HtmlRenderer.builder().build().render(document);
     }
 
     private String normalize(String value, String defaultValue) {

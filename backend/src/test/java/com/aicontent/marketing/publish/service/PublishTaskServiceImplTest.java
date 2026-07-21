@@ -153,7 +153,7 @@ class PublishTaskServiceImplTest {
         doReturn(true).when(service).update(any(LambdaUpdateWrapper.class));
         doReturn(true).when(service).updateById(task);
 
-        var result = service.executeTask(1L, 9L);
+        var result = service.prepareTask(1L, 9L);
 
         assertEquals("FAILED", result.getStatus());
         assertEquals("平台拒绝发布", result.getErrorMessage());

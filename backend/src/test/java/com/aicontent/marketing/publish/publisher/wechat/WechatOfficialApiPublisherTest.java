@@ -2,7 +2,6 @@ package com.aicontent.marketing.publish.publisher.wechat;
 
 import com.aicontent.marketing.publish.publisher.PublishContext;
 import com.aicontent.marketing.publish.publisher.PublishResult;
-import com.aicontent.marketing.publish.service.markdown.MarkdownToWechatHtmlService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -45,7 +44,6 @@ class WechatOfficialApiPublisherTest {
         return new WechatOfficialApiPublisher(
                 client,
                 new WechatAccessTokenCache(),
-                new MarkdownToWechatHtmlService(),
                 objectMapper
         );
     }

@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Set;
 
 @Component
-public class PlatformAdaptRuleFactory {
+public class PlatformAdaptRules {
 
     private final Map<String, PlatformAdaptRule> rules = Map.of(
             "WECHAT_OFFICIAL", new PlatformAdaptRule(
