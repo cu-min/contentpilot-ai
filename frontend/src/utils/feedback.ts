@@ -1,4 +1,4 @@
-export function getErrorText(error: unknown, fallback: string) {
+function getErrorText(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 

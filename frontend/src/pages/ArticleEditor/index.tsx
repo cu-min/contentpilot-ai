@@ -1,5 +1,5 @@
 import { Button, Col, Form, Input, Modal, Row, Select, Space, Typography, message } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { createArticle, getArticleDetail, updateArticle } from '../../api/article';
 import { listProductConfigs } from '../../api/productConfig';
@@ -35,12 +35,9 @@ export default function ArticleEditor() {
   const content = Form.useWatch('content', form);
   const openPlatformGenerate = searchParams.get('openPlatformGenerate') === '1';
 
-  const pageDescription = useMemo(
-    () => isEdit
-      ? '打磨标题、摘要和正文，让一篇文章继续变成适合不同平台发布的内容。'
-      : '从一篇新文章开始，把想法写成草稿，再继续适配到不同平台。',
-    [isEdit],
-  );
+  const pageDescription = isEdit
+    ? '打磨标题、摘要和正文，让一篇文章继续变成适合不同平台发布的内容。'
+    : '从一篇新文章开始，把想法写成草稿，再继续适配到不同平台。';
 
   useEffect(() => {
     listProductConfigs()
