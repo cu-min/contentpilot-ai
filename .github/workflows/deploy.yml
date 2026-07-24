@@ -1,30 +1,112 @@
 name: Deploy to Server
 
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ["Verify"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 jobs:
   deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main'
+      )
     runs-on: ubuntu-latest
     steps:
-      - name: SSH 到服务器，拉代码，热更新部署
+      - name: SSH 到服务器并部署已验证版本
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          timeout: 30s
+          command_timeout: 20m
           script: |
-            cd /opt/contentpilot-ai
-            git fetch origin main && git reset --hard origin/main
+            set -eu
 
-            # 后端：Maven 构建 + 热更新（docker compose 重建，加载最新环境变量）
-            cd backend
-            mvn -s /opt/mvn-aliyun.xml package -DskipTests -q
-            cd ..
-            docker compose up -d --no-build backend
+            REPO_DIR=/opt/contentpilot-ai
+            COMPOSE_DEPLOY="docker compose -f docker-compose.yml -f docker-compose.deploy.yml"
 
-            # 前端：有变更才重建
-            if git diff --name-only HEAD@{1} HEAD 2>/dev/null | grep -q '^frontend/'; then
-              docker compose up -d --build frontend
+            echo "[deploy] 1/7 检查服务器环境"
+            test -d "$REPO_DIR/.git"
+            command -v git >/dev/null
+            command -v mvn >/dev/null
+            command -v docker >/dev/null
+            docker compose version
+
+            cd "$REPO_DIR"
+            test -f .env
+
+            echo "[deploy] 2/7 同步 main 分支"
+            PREVIOUS_SHA="$(git rev-parse HEAD)"
+            git fetch --prune origin main
+            TARGET_SHA="$(git rev-parse origin/main)"
+            git reset --hard "$TARGET_SHA"
+            echo "[deploy] $PREVIOUS_SHA -> $TARGET_SHA"
+
+            echo "[deploy] 3/7 构建后端 JAR"
+            mvn \
+              -f backend/pom.xml \
+              -s backend/maven-aliyun-settings.xml \
+              --batch-mode \
+              --no-transfer-progress \
+              -DskipTests \
+              package
+            BACKEND_JAR=backend/target/ai-content-marketing-backend-0.0.1-SNAPSHOT.jar
+            test -s "$BACKEND_JAR"
+
+            echo "[deploy] 4/7 校验 Compose 与生产环境变量"
+            $COMPOSE_DEPLOY config --quiet
+
+            echo "[deploy] 5/7 准备后端运行时镜像"
+            BACKEND_IMAGE_ID="$($COMPOSE_DEPLOY images -q backend 2>/dev/null || true)"
+            if [ -z "$BACKEND_IMAGE_ID" ] ||
+               ! git diff --quiet "$PREVIOUS_SHA" "$TARGET_SHA" -- \
+                 backend/Dockerfile \
+                 backend/docker-entrypoint.sh \
+                 backend/pom.xml; then
+              $COMPOSE_DEPLOY build backend
             fi
+
+            echo "[deploy] 6/7 重建后端容器并加载新 JAR、最新环境变量"
+            $COMPOSE_DEPLOY up -d mysql
+            $COMPOSE_DEPLOY up -d --no-build --force-recreate backend
+
+            HEALTHY=false
+            ATTEMPT=1
+            while [ "$ATTEMPT" -le 60 ]; do
+              if $COMPOSE_DEPLOY exec -T backend \
+                curl -fsS http://localhost:8080/api/health >/dev/null 2>&1; then
+                HEALTHY=true
+                break
+              fi
+              sleep 2
+              ATTEMPT=$((ATTEMPT + 1))
+            done
+
+            if [ "$HEALTHY" != true ]; then
+              echo "[deploy] 后端健康检查失败，输出最近日志"
+              $COMPOSE_DEPLOY logs --tail=150 backend
+              exit 1
+            fi
+
+            echo "[deploy] 7/7 按需构建前端"
+            FRONTEND_CONTAINER_ID="$($COMPOSE_DEPLOY ps -q frontend 2>/dev/null || true)"
+            if [ -z "$FRONTEND_CONTAINER_ID" ] ||
+               ! git diff --quiet "$PREVIOUS_SHA" "$TARGET_SHA" -- frontend/; then
+              $COMPOSE_DEPLOY up -d --build frontend
+            fi
+
+            $COMPOSE_DEPLOY ps
+            echo "[deploy] 部署完成：$TARGET_SHA"

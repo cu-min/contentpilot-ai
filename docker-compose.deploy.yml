@@ -1,0 +1,9 @@
+services:
+  backend:
+    volumes:
+      # 部署流水线先在宿主机构建 JAR，再用此覆盖文件将新版本挂载进容器。
+      # 基础 docker-compose.yml 不引用宿主机 JAR，因此本地首次 --build 不受影响。
+      - type: bind
+        source: ./backend/target/ai-content-marketing-backend-0.0.1-SNAPSHOT.jar
+        target: /app/app.jar
+        read_only: true

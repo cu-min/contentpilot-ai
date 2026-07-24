@@ -188,3 +188,44 @@ docker volume inspect ai-content-marketing-system_mysql-data
 - Git 和容器日志中没有 Cookie、Token、API Key 或密码。
 - `PLATFORM_CREDENTIAL_KEY` 已配置且稳定备份，平台账号 `auth_config` 已从旧明文迁移为 `enc:v1:` 密文。
 - CSDN、知乎自动化只做内容填充，不点击最终发布。
+
+## 10. GitHub Actions 自动部署
+
+自动部署由两个工作流串联完成：
+
+1. `Verify` 对 `main` 的提交运行后端测试、前端测试、依赖审计和前端构建。
+2. 只有 `Verify` 成功后，`Deploy to Server` 才会通过 SSH 部署；也可以从 Actions 页面手动触发。
+
+服务器需要提前满足：
+
+```bash
+test -d /opt/contentpilot-ai/.git
+test -f /opt/contentpilot-ai/.env
+git --version
+mvn --version
+docker version
+docker compose version
+```
+
+部署时使用仓库内的 `backend/maven-aliyun-settings.xml`，不依赖服务器上的
+`/opt/mvn-aliyun.xml`。后端 JAR 构建完成后，通过
+`docker-compose.deploy.yml` 只读挂载到容器 `/app/app.jar`，然后强制重建后端容器，
+从而同时加载新代码和最新 `.env`。
+
+部署日志按七个阶段输出。失败时先查看最后出现的阶段编号：
+
+- 停在 `1/7`：检查 SSH 后的服务器目录、Git、Maven、Docker 或 `.env`。
+- 停在 `2/7`：检查服务器访问 GitHub 的权限、网络和仓库远程地址。
+- 停在 `3/7`：检查 Maven/JDK、阿里云镜像和 Java 编译错误。
+- 停在 `4/7`：检查 `.env` 是否包含 Compose 要求的全部变量。
+- 停在 `5/7`：检查 Dockerfile 和镜像构建。
+- 停在 `6/7`：检查 MySQL、后端启动日志和 `/api/health`。
+- 停在 `7/7`：检查前端 Dockerfile、npm 依赖和 Nginx 配置。
+
+部署完成后验证：
+
+```bash
+cd /opt/contentpilot-ai
+docker compose -f docker-compose.yml -f docker-compose.deploy.yml ps
+curl -fsS http://127.0.0.1/api/health
+```
