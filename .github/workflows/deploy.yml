@@ -8,7 +8,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: SSH 到服务器，拉代码，重新构建部署
+      - name: SSH 到服务器，拉代码，热更新部署
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -16,6 +16,16 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             cd /opt/contentpilot-ai
-            git pull origin main
-            cd backend && mvn package -DskipTests && cd ..
-            docker compose up -d --build
+            git fetch origin main && git reset --hard origin/main
+
+            # 后端：Maven 构建 + 热更新 jar 到容器（秒级）
+            cd backend
+            mvn -s /opt/mvn-aliyun.xml package -DskipTests -q
+            docker cp target/ai-content-marketing-backend-0.0.1-SNAPSHOT.jar ai-content-marketing-backend:/app/app.jar
+            docker restart ai-content-marketing-backend
+            cd ..
+
+            # 前端：有变更才重建
+            if git diff --name-only HEAD@{1} HEAD 2>/dev/null | grep -q '^frontend/'; then
+              docker compose up -d --build frontend
+            fi
