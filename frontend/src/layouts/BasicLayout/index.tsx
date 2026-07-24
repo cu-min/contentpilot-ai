@@ -52,7 +52,7 @@ function BasicLayout() {
       </Sider>
       <Layout className="basic-main">
         <Header className="top-header">
-          <Typography.Text strong>让好内容自己生长，让好产品被更多人看见。</Typography.Text>
+          <Typography.Text strong>让好内容自己生长，让好产品被更多人看见。🚀</Typography.Text>
           <Space size={16} align="center">
             <Tag color={authStore.role === 'ADMIN' ? 'blue' : 'green'}>
               {authStore.role === 'ADMIN' ? '管理员' : '运营人员'}
