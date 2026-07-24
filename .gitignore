@@ -21,3 +21,8 @@ application-local.yml
 
 # Local Maven dependency cache
 .m2-workspace/
+backend/node_modules/
+backend/coverage/
+frontend/coverage/
+backend/package-lock.json
+backend/package.json
